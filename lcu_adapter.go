@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math/rand"
 	"net/http"
 	"os"
@@ -139,7 +141,7 @@ func (a *HTTPLCUAdapter) DiscoverDevices(ctx context.Context, lcu *LCU) ([]LcuDe
 }
 
 func (a *HTTPLCUAdapter) ApplyDimming(ctx context.Context, lcu *LCU, deviceUID string, intensity int) error {
-	_ = fmt.Sprintf("http://%s:%d/api/devices/%s/dimming", lcu.IPAddress, lcu.Port, deviceUID)
+	url := fmt.Sprintf("http://%s:%d/api/devices/%s/dimming", lcu.IPAddress, lcu.Port, deviceUID)
 
 	body := map[string]interface{}{
 		"intensity": intensity,
@@ -147,15 +149,33 @@ func (a *HTTPLCUAdapter) ApplyDimming(ctx context.Context, lcu *LCU, deviceUID s
 		"source":    "admin",
 	}
 
-	jsonBody, _ := json.Marshal(body)
-	
-	// Re-creating to handle body correctly
-	// ... (actual implementation would use bytes.NewBuffer(jsonBody))
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
 
-	// Let's use a simpler way for now in this snippet
-	_ = jsonBody
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return err
+	}
 
-	// This is a placeholder for the actual HTTP call
+	req.Header.Set("Content-Type", "application/json")
+	if lcu.AuthToken != "" {
+		req.Header.Set("Authorization", "Bearer "+lcu.AuthToken)
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("LCU returned status %d: %s", resp.StatusCode, string(respBody))
+	}
+
 	return nil
 }
 

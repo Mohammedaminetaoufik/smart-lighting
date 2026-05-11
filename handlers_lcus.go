@@ -309,7 +309,6 @@ func buildLCU(form LCUFormData) (LCU, []string) {
 	}, nil
 }
 
-
 func handleGetLCULampadaires(db *sql.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, err := parseIDParam(c, "id")
@@ -317,17 +316,11 @@ func handleGetLCULampadaires(db *sql.DB) gin.HandlerFunc {
 			respondError(c, http.StatusBadRequest, "ID invalide")
 			return
 		}
-		lampadaires, err := listLampadaires(c.Request.Context(), db, map[string]string{})
+		lampadaires, err := listLampadairesByLCU(c.Request.Context(), db, id)
 		if err != nil {
-			respondError(c, http.StatusInternalServerError, "Erreur base de donnees")
+			respondError(c, http.StatusInternalServerError, "Erreur base de données")
 			return
 		}
-		filtered := []Lampadaire{}
-		for _, l := range lampadaires {
-			if l.LCUID != nil && *l.LCUID == id {
-				filtered = append(filtered, l)
-			}
-		}
-		respondJSON(c, http.StatusOK, filtered)
+		respondJSON(c, http.StatusOK, lampadaires)
 	}
 }

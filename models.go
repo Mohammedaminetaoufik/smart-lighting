@@ -242,9 +242,8 @@ type SystemSetting struct {
 }
 
 type AccessLog struct {
-ID int `json:"id"`
-UserID int `json:"user_id"`
-Action string `json:"action"`
-CreatedAt string `json:"created_at"`
+	ID        int    `json:"id"`
+	UserID    int    `json:"user_id"`
+	Action    string `json:"action"`
+	CreatedAt string `json:"created_at"`
 }
-

@@ -575,7 +575,7 @@ async function loadEnergieStats() {
                 data.by_zone.forEach(z => {
                     html += '<tr><td>'+z.zone+'</td><td>'+z.lamp_count+'</td><td>'+z.nominal_power_w+' W</td><td>'+z.current_power_w+' W</td><td>'+z.saving_w+' W</td></tr>';
                 });
-            } else { html = '<tr><td colspan="5" style="text-align:center;">Aucune donnée par zone</td></tr>'; }
+            } else { html = '<tr><td colspan="5" style="text-align:center;">Aucune donnï¿½e par zone</td></tr>'; }
             document.getElementById('energyZoneList').innerHTML = html;
         }
     } catch (e) { console.error('Error loadEnergieStats', e); }

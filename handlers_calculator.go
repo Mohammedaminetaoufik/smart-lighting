@@ -3,13 +3,14 @@ package main
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
 )
 
-func runIntelligentCalculator(ctx context.Context, db *sql.DB, lampadaireID int, apply bool) (*CalculatorDecision, error) {
+func runIntelligentCalculator(ctx context.Context, db *sql.DB, adapter LCUAdapter, lampadaireID int, apply bool) (*CalculatorDecision, error) {
 	lamp, err := getLampadaireByID(ctx, db, lampadaireID)
 	if err != nil {
 		return nil, err
@@ -45,22 +46,41 @@ func runIntelligentCalculator(ctx context.Context, db *sql.DB, lampadaireID int,
 		RuleName:             res.RuleName,
 	}
 
+	var decisionID int
 	err = tx.QueryRowContext(ctx, `
 		INSERT INTO calculator_decisions (lampadaire_id, recommended_intensity, decision_reason, confidence, applied, rule_name)
 		VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, created_at
-	`, lampadaireID, d.RecommendedIntensity, d.DecisionReason, d.Confidence, false, d.RuleName).Scan(&d.ID, &d.CreatedAt)
+	`, lampadaireID, d.RecommendedIntensity, d.DecisionReason, d.Confidence, false, d.RuleName).Scan(&decisionID, &d.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
+	d.ID = decisionID
 
 	if apply {
 		// Insert dimming command
-		_, err = tx.ExecContext(ctx, `
+		var cmdID int
+		err = tx.QueryRowContext(ctx, `
 			INSERT INTO dimming_commands (lampadaire_id, source, old_intensity, new_intensity, reason, status, applied_at)
-			VALUES ($1,'calculateur_intelligent',$2,$3,$4,'applied',NOW())
-		`, lampadaireID, lamp.Intensite, d.RecommendedIntensity, d.DecisionReason)
+			VALUES ($1,'calculateur_intelligent',$2,$3,$4,'pending',NOW())
+			RETURNING id
+		`, lampadaireID, lamp.Intensite, d.RecommendedIntensity, d.DecisionReason).Scan(&cmdID)
 		if err != nil {
 			return nil, err
+		}
+
+		// Hardware Apply via LCU if associated
+		if lamp.LCUID != nil && lamp.DeviceUID != "" {
+			lcu, err := getLCUByID(ctx, db, *lamp.LCUID)
+			if err == nil {
+				err = adapter.ApplyDimming(ctx, lcu, lamp.DeviceUID, d.RecommendedIntensity)
+				if err != nil {
+					// Mark command as failed and create alert
+					tx.ExecContext(ctx, "UPDATE dimming_commands SET status = 'failed' WHERE id = $1", cmdID)
+					createAlertIfNotExists(ctx, tx, lampadaireID, "commande_calculateur_echec", "critical", "Calculateur: Échec envoi LCU: "+err.Error())
+					tx.Commit()
+					return &d, fmt.Errorf("échec envoi à la LCU: %w", err)
+				}
+			}
 		}
 
 		// Update lampadaire
@@ -71,7 +91,8 @@ func runIntelligentCalculator(ctx context.Context, db *sql.DB, lampadaireID int,
 			return nil, err
 		}
 
-		// Mark decision as applied
+		// Mark decision as applied and command as applied
+		tx.ExecContext(ctx, "UPDATE dimming_commands SET status = 'applied' WHERE id = $1", cmdID)
 		_, err = tx.ExecContext(ctx, `UPDATE calculator_decisions SET applied=true WHERE id=$1`, d.ID)
 		if err != nil {
 			return nil, err
@@ -86,7 +107,7 @@ func runIntelligentCalculator(ctx context.Context, db *sql.DB, lampadaireID int,
 	return &d, nil
 }
 
-func handleRunCalculator(db *sql.DB) gin.HandlerFunc {
+func handleRunCalculator(db *sql.DB, adapter LCUAdapter) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, err := parseIDParam(c, "id")
 		if err != nil {
@@ -97,7 +118,7 @@ func handleRunCalculator(db *sql.DB) gin.HandlerFunc {
 			Apply bool `json:"apply"`
 		}
 		c.BindJSON(&body)
-		decision, err := runIntelligentCalculator(c.Request.Context(), db, id, body.Apply)
+		decision, err := runIntelligentCalculator(c.Request.Context(), db, adapter, id, body.Apply)
 		if err != nil {
 			respondError(c, http.StatusInternalServerError, "Erreur calculateur.")
 			return
@@ -106,7 +127,7 @@ func handleRunCalculator(db *sql.DB) gin.HandlerFunc {
 	}
 }
 
-func handleRunCalculatorAll(db *sql.DB) gin.HandlerFunc {
+func handleRunCalculatorAll(db *sql.DB, adapter LCUAdapter) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var body struct {
 			Apply bool `json:"apply"`
@@ -127,7 +148,7 @@ func handleRunCalculatorAll(db *sql.DB) gin.HandlerFunc {
 		}
 		decisions := []CalculatorDecision{}
 		for _, id := range ids {
-			d, err := runIntelligentCalculator(c.Request.Context(), db, id, body.Apply)
+			d, err := runIntelligentCalculator(c.Request.Context(), db, adapter, id, body.Apply)
 			if err == nil && d != nil {
 				decisions = append(decisions, *d)
 			}

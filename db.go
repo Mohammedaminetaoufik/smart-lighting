@@ -994,8 +994,6 @@ func markInactiveLampadairesOffline(ctx context.Context, db *sql.DB) error {
 	return nil
 }
 
-
-
 func getEnergySummary(ctx context.Context, db *sql.DB) (map[string]interface{}, error) {
 	lampadaires, err := listLampadaires(ctx, db, map[string]string{})
 	if err != nil {

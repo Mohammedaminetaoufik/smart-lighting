@@ -2,9 +2,9 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"html/template"
 	"log"
-	"database/sql"
 	"net/http"
 	"os"
 	"os/signal"
@@ -57,13 +57,13 @@ func main() {
 	api := router.Group("/api")
 	{
 		api.GET("/users", handleGetUsers(db))
-api.POST("/users", handleCreateUser(db))
-api.GET("/logs", handleGetLogs(db))
-api.GET("/lampadaires/:id", handleGetLampadaireJSON(db))
+		api.POST("/users", handleCreateUser(db))
+		api.GET("/logs", handleGetLogs(db))
+		api.GET("/lampadaires/:id", handleGetLampadaireJSON(db))
 		api.GET("/dashboard/stats", handleGetDashboardStats(db))
-		api.GET("/lampadaires/missing-location", handleGetMissingLocationLampadaires(db))
-		api.POST("/lampadaires/:id/location", handleUpdateLampadaireLocation(db))
 		api.GET("/energy/summary", handleGetEnergySummary(db))
+		api.GET("/lcus", handleListLCUsJSON(db))
+		api.GET("/lcus/:id", handleGetLCUJSON(db))
 		api.POST("/lcus/:id/test", handleTestLCU(db, lcuAdapter))
 		api.POST("/lcus/:id/sync", handleSyncLCU(db, lcuAdapter))
 		api.GET("/lcus/:id/lampadaires", handleGetLCULampadaires(db))
@@ -84,15 +84,9 @@ api.GET("/lampadaires/:id", handleGetLampadaireJSON(db))
 		api.POST("/alerts/:id/resolve", handleResolveAlert(db))
 
 		// Calculator
-		api.POST("/calculateur/run/:id", handleRunCalculator(db))
-		api.POST("/calculateur/run-all", handleRunCalculatorAll(db))
+		api.POST("/calculateur/run/:id", handleRunCalculator(db, lcuAdapter))
+		api.POST("/calculateur/run-all", handleRunCalculatorAll(db, lcuAdapter))
 		api.GET("/lampadaires/:id/decisions", handleGetDecisions(db))
-
-		// LCU API
-		api.GET("/lcus", handleListLCUsJSON(db))
-		api.GET("/lcus/:id", handleGetLCUJSON(db))
-		api.POST("/lcus/:id/test", handleTestLCU(db, lcuAdapter))
-		api.POST("/lcus/:id/sync", handleSyncLCU(db, lcuAdapter))
 
 		// Location Correction
 		api.GET("/lampadaires/missing-location", handleListMissingLocation(db))
