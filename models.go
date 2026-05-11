@@ -202,9 +202,11 @@ type DashboardStats struct {
 	LampadairesOnline      int                 `json:"lampadaires_online"`
 	LampadairesOffline     int                 `json:"lampadaires_offline"`
 	LampadairesMaintenance int                 `json:"lampadaires_maintenance"`
+	InactiveLampadaires    int                 `json:"inactive_lampadaires"`
 	MissingLocation        int                 `json:"missing_location"`
 	OpenAlerts             int                 `json:"open_alerts"`
 	CriticalAlerts         int                 `json:"critical_alerts"`
+	CommandsToday          int                 `json:"commands_today"`
 	AvgIntensity           float64             `json:"avg_intensity"`
 	AvgPower               float64             `json:"avg_power"`
 	EstimatedPowerSavingW  float64             `json:"estimated_power_saving_w"`

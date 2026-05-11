@@ -249,16 +249,21 @@ func buildLampadaire(form FormData) (Lampadaire, []string) {
 		errors = append(errors, "Selectionnez un emplacement sur la carte.")
 	}
 
-	lat, latErr := strconv.ParseFloat(form.Latitude, 64)
-	lng, lngErr := strconv.ParseFloat(form.Longitude, 64)
-	if latErr != nil || lngErr != nil {
-		errors = append(errors, "Latitude et longitude doivent etre des nombres valides.")
-	} else {
-		if lat < -90 || lat > 90 {
-			errors = append(errors, "Latitude doit etre entre -90 et 90.")
+	var latPtr, lngPtr *float64
+	if form.Latitude != "" {
+		lat, err := strconv.ParseFloat(form.Latitude, 64)
+		if err != nil || lat < -90 || lat > 90 {
+			errors = append(errors, "Latitude invalide.")
+		} else {
+			latPtr = &lat
 		}
-		if lng < -180 || lng > 180 {
-			errors = append(errors, "Longitude doit etre entre -180 et 180.")
+	}
+	if form.Longitude != "" {
+		lng, err := strconv.ParseFloat(form.Longitude, 64)
+		if err != nil || lng < -180 || lng > 180 {
+			errors = append(errors, "Longitude invalide.")
+		} else {
+			lngPtr = &lng
 		}
 	}
 
@@ -309,8 +314,8 @@ func buildLampadaire(form FormData) (Lampadaire, []string) {
 
 	return Lampadaire{
 		Reference:        form.Reference,
-		Latitude:         &lat,
-		Longitude:        &lng,
+		Latitude:         latPtr,
+		Longitude:        lngPtr,
 		Zone:             form.Zone,
 		TypeDriver:       form.TypeDriver,
 		Protocole:        form.Protocole,

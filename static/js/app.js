@@ -297,10 +297,10 @@ function runCalcForDetail(id, apply) {
 function loadDashboard() {
     fetch('/api/dashboard/stats').then(r=>r.json()).then(s => {
         $('dashStats').innerHTML = `
-            <div class="stat-card"><div class="stat-label">Total lampadaires</div><div class="stat-value">${s.total}</div></div>
-            <div class="stat-card"><div class="stat-label">Online</div><div class="stat-value green">${s.online}</div></div>
-            <div class="stat-card"><div class="stat-label">Offline</div><div class="stat-value red">${s.offline}</div></div>
-            <div class="stat-card"><div class="stat-label">Maintenance</div><div class="stat-value orange">${s.maintenance}</div></div>
+            <div class="stat-card"><div class="stat-label">Total lampadaires</div><div class="stat-value">${s.total_lampadaires}</div></div>
+            <div class="stat-card"><div class="stat-label">Online</div><div class="stat-value green">${s.lampadaires_online}</div></div>
+            <div class="stat-card"><div class="stat-label">Offline</div><div class="stat-value red">${s.lampadaires_offline}</div></div>
+            <div class="stat-card"><div class="stat-label">Maintenance</div><div class="stat-value orange">${s.lampadaires_maintenance}</div></div>
             <div class="stat-card"><div class="stat-label">Offline (15m+)</div><div class="stat-value red">${s.inactive_lampadaires}</div></div>
             <div class="stat-card"><div class="stat-label">Alertes ouvertes</div><div class="stat-value red">${s.open_alerts}</div></div>
             <div class="stat-card"><div class="stat-label">Commandes/Jour</div><div class="stat-value blue">${s.commands_today}</div></div>
@@ -500,6 +500,8 @@ function openLCUModal(lcu = null) {
         $('lcu_port_field').value = lcu.port;
         $('lcu_protocol_field').value = lcu.protocol;
         $('lcu_zone_field').value = lcu.zone || '';
+        $('lcu_lat_field').value = lcu.latitude || '';
+        $('lcu_lng_field').value = lcu.longitude || '';
     } else {
         $('lcuFormMode').textContent = 'Ajouter une Gateway';
         $('formLcu').action = '/lcus';

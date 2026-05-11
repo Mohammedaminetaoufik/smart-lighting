@@ -165,14 +165,19 @@ func handleSyncLCU(db *sql.DB, adapter LCUAdapter) gin.HandlerFunc {
 			err := tx.QueryRowContext(c.Request.Context(), "SELECT id FROM lampadaires WHERE lcu_id = $1 AND device_uid = $2", id, d.DeviceUID).Scan(&existingID)
 
 			locStatus := "confirmed"
-			if d.Latitude == nil || d.Longitude == nil {
-				locStatus = "missing"
+			lat := d.Latitude
+			lng := d.Longitude
+
+			if lat == nil || lng == nil {
+				locStatus = "estimated"
+				lat = lcu.Latitude
+				lng = lcu.Longitude
 			}
 
 			lamp := Lampadaire{
 				Reference:       d.Reference,
-				Latitude:        d.Latitude,
-				Longitude:       d.Longitude,
+				Latitude:        lat,
+				Longitude:       lng,
 				Zone:            d.Zone,
 				TypeDriver:      d.TypeDriver,
 				Protocole:       d.Protocole,

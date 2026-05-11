@@ -17,12 +17,15 @@ func getDashboardStats(ctx context.Context, db *sql.DB) (*DashboardStats, error)
 	db.QueryRowContext(ctx, "SELECT COUNT(*) FROM lampadaires WHERE archived_at IS NULL AND etat='offline'").Scan(&stats.LampadairesOffline)
 	db.QueryRowContext(ctx, "SELECT COUNT(*) FROM lampadaires WHERE archived_at IS NULL AND etat='maintenance'").Scan(&stats.LampadairesMaintenance)
 	db.QueryRowContext(ctx, "SELECT COUNT(*) FROM lampadaires WHERE archived_at IS NULL AND (latitude=0 OR latitude IS NULL) AND location_status='missing'").Scan(&stats.MissingLocation)
+	db.QueryRowContext(ctx, "SELECT COUNT(*) FROM lampadaires WHERE archived_at IS NULL AND last_seen_at < NOW() - INTERVAL '15 minutes'").Scan(&stats.InactiveLampadaires)
 
 	db.QueryRowContext(ctx, "SELECT COALESCE(AVG(intensite),0) FROM lampadaires WHERE archived_at IS NULL").Scan(&stats.AvgIntensity)
 	db.QueryRowContext(ctx, "SELECT COALESCE(AVG(sm.puissance),0) FROM sensor_measurements sm INNER JOIN (SELECT DISTINCT ON (lampadaire_id) id FROM sensor_measurements ORDER BY lampadaire_id, created_at DESC) latest ON sm.id = latest.id").Scan(&stats.AvgPower)
 
 	db.QueryRowContext(ctx, "SELECT COUNT(*) FROM alerts WHERE status='open'").Scan(&stats.OpenAlerts)
 	db.QueryRowContext(ctx, "SELECT COUNT(*) FROM alerts WHERE status='open' AND severity='critical'").Scan(&stats.CriticalAlerts)
+
+	db.QueryRowContext(ctx, "SELECT COUNT(*) FROM dimming_commands WHERE created_at >= NOW() - INTERVAL '24 hours'").Scan(&stats.CommandsToday)
 
 	db.QueryRowContext(ctx, "SELECT COALESCE(SUM(puissance - (puissance * intensite / 100.0)), 0), COALESCE(AVG(100 - intensite), 0) FROM lampadaires WHERE archived_at IS NULL AND puissance IS NOT NULL").Scan(&stats.EstimatedPowerSavingW, &stats.EstimatedSavingPercent)
 
