@@ -76,20 +76,26 @@ document.addEventListener('DOMContentLoaded', () => {
     lcus.forEach(l => {
         if (l.latitude == null || l.longitude == null) return;
         const status = (l.status || 'offline').toLowerCase();
+        const linkedLamps = lampadaires.filter(lamp => lamp.lcu_id === l.id).length;
         
         const icon = L.divIcon({
             className: `marker-gateway status-${status}`,
-            html: `🗼`,
-            iconSize: [24, 24], iconAnchor: [12, 12], popupAnchor: [0, -12]
+            html: `🗼<span class="lcu-count">${linkedLamps}</span>`,
+            iconSize: [30, 30], iconAnchor: [15, 15], popupAnchor: [0, -15]
         });
 
-        const popup = `<div>
-            <strong>Gateway: ${l.reference}</strong><br/>
-            <small>${l.ip_address}:${l.port}</small><hr/>
-            Statut: <span class="badge ${status}">${status}</span><br/>
-            Zone: ${l.zone || '—'}<br/>
-            Dernière sync: ${fmt(l.last_sync_at)}<br/>
-            <div class="popup-actions" style="margin-top:8px;">
+        const popup = `<div class="premium-popup">
+            <div class="popup-header">
+                <strong>Gateway: ${l.reference}</strong>
+                <span class="badge ${status}">${status}</span>
+            </div>
+            <div class="popup-body">
+                <small>${l.ip_address}:${l.port}</small><br/>
+                Zone: <strong>${l.zone || '—'}</strong><br/>
+                Lampes reliées: <strong>${linkedLamps}</strong><br/>
+                Dernière sync: ${fmt(l.last_sync_at)}
+            </div>
+            <div class="popup-actions">
                 <button onclick="testLCU(${l.id})" class="btn-sm">🔌 Tester</button>
                 <button onclick="syncLCU(${l.id})" class="btn-sm" style="background:var(--accent);color:#000;">🔄 Sync</button>
             </div>
@@ -100,7 +106,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Add markers
     lampadaires.forEach(l => {
-        if (!l.latitude || !l.longitude || l.location_status === 'missing') return;
+        if (l.latitude == null || l.longitude == null || l.location_status === 'missing') return;
         const etat = (l.etat || 'offline').toLowerCase();
         const colors = { online: '#22c55e', offline: '#ef4444', maintenance: '#f59e0b' };
         const color = colors[etat] || '#6b7280';
@@ -108,22 +114,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const icon = L.divIcon({
             className: `custom-marker ${hasAlert ? 'marker-pulse' : ''}`,
-            html: `<div style="background:${color};width:14px;height:14px;border-radius:50%;border:${hasAlert ? '3px solid #ef4444' : '2px solid rgba(255,255,255,0.8)'};box-shadow:0 0 6px ${color}80;"></div>`,
+            html: `<div style="background:${color};width:14px;height:14px;border-radius:50%;border:${hasAlert ? '3px solid #ef4444' : '2px solid rgba(255,255,255,0.8)'};box-shadow:0 0 10px ${color}80;"></div>`,
             iconSize: [20, 20], iconAnchor: [10, 10], popupAnchor: [0, -12]
         });
 
-        const popup = `<div>
-            <strong>${l.reference}</strong>
-            <div style="margin:6px 0;font-size:12px;">
+        const popup = `<div class="premium-popup">
+            <div class="popup-header">
+                <strong>${l.reference}</strong>
                 <span class="badge ${etat}">${etat}</span>
-                <span class="badge ${l.location_status}">${l.location_status}</span><br/>
-                LCU: ${l.lcu_reference || '—'}<br/>
-                Intensité: ${l.intensite}% · Zone: ${l.zone||'—'}<br/>
+            </div>
+            <div class="popup-body">
+                Statut: <span class="badge ${l.location_status}">${l.location_status}</span><br/>
+                LCU: <strong>${l.lcu_reference || '—'}</strong><br/>
+                Intensité: <strong>${l.intensite}%</strong><br/>
+                Zone: <strong>${l.zone||'—'}</strong>
             </div>
             <div class="popup-actions">
-                <button onclick="editLamp(${l.id})" style="background:var(--info);color:#fff;">Modifier</button>
-                <button onclick="showDetailByID(${l.id})" style="background:var(--accent);color:#000;">Fiche</button>
-                <button onclick="centerMap(${l.latitude}, ${l.longitude})" style="background:var(--secondary);color:#fff;">Centrer</button>
+                <button onclick="editLamp(${l.id})" class="btn-sm" style="background:var(--info);color:#fff;">Modifier</button>
+                <button onclick="showDetailByID(${l.id})" class="btn-sm" style="background:var(--accent);color:#000;">Fiche</button>
+                <button onclick="centerMap(${l.latitude}, ${l.longitude})" class="btn-sm" style="background:var(--secondary);color:#fff;">Centrer</button>
             </div></div>`;
 
         const marker = L.marker([l.latitude, l.longitude], { icon }).addTo(map).bindPopup(popup);

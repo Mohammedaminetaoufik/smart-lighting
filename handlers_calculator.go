@@ -72,7 +72,7 @@ func runIntelligentCalculator(ctx context.Context, db *sql.DB, adapter LCUAdapte
 		if lamp.LCUID != nil && lamp.DeviceUID != "" {
 			lcu, err := getLCUByID(ctx, db, *lamp.LCUID)
 			if err == nil {
-				err = adapter.ApplyDimming(ctx, lcu, lamp.DeviceUID, d.RecommendedIntensity)
+				err = adapter.ApplyDimming(ctx, lcu, lamp.DeviceUID, d.RecommendedIntensity, d.DecisionReason, "calculateur_intelligent")
 				if err != nil {
 					// Mark command as failed and create alert
 					tx.ExecContext(ctx, "UPDATE dimming_commands SET status = 'failed' WHERE id = $1", cmdID)

@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"math/rand"
 	"net/http"
 	"os"
@@ -16,14 +15,14 @@ import (
 type LCUAdapter interface {
 	Health(ctx context.Context, lcu *LCU) error
 	DiscoverDevices(ctx context.Context, lcu *LCU) ([]LcuDeviceDTO, error)
-	ApplyDimming(ctx context.Context, lcu *LCU, deviceUID string, intensity int) error
+	ApplyDimming(ctx context.Context, lcu *LCU, deviceUID string, intensity int, reason string, source string) error
 }
 
 // NewLCUAdapter returns an LCU adapter based on the environment configuration.
 func NewLCUAdapter() LCUAdapter {
 	mode := os.Getenv("LCU_DISCOVERY_MODE")
 	if mode == "http" {
-		return &HTTPLCUAdapter{}
+		return &HTTPLCUAdapter{Timeout: 5 * time.Second}
 	}
 	return &MockLCUAdapter{}
 }
@@ -77,13 +76,15 @@ func (a *MockLCUAdapter) DiscoverDevices(ctx context.Context, lcu *LCU) ([]LcuDe
 	return devices, nil
 }
 
-func (a *MockLCUAdapter) ApplyDimming(ctx context.Context, lcu *LCU, deviceUID string, intensity int) error {
+func (a *MockLCUAdapter) ApplyDimming(ctx context.Context, lcu *LCU, deviceUID string, intensity int, reason string, source string) error {
 	time.Sleep(100 * time.Millisecond)
 	return nil
 }
 
 // HTTPLCUAdapter communicates with a real LCU via HTTP.
-type HTTPLCUAdapter struct{}
+type HTTPLCUAdapter struct {
+	Timeout time.Duration
+}
 
 func (a *HTTPLCUAdapter) Health(ctx context.Context, lcu *LCU) error {
 	url := fmt.Sprintf("http://%s:%d/api/health", lcu.IPAddress, lcu.Port)
@@ -96,7 +97,7 @@ func (a *HTTPLCUAdapter) Health(ctx context.Context, lcu *LCU) error {
 		req.Header.Set("Authorization", "Bearer "+lcu.AuthToken)
 	}
 
-	client := &http.Client{Timeout: 3 * time.Second}
+	client := &http.Client{Timeout: a.Timeout}
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
@@ -121,7 +122,7 @@ func (a *HTTPLCUAdapter) DiscoverDevices(ctx context.Context, lcu *LCU) ([]LcuDe
 		req.Header.Set("Authorization", "Bearer "+lcu.AuthToken)
 	}
 
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := &http.Client{Timeout: a.Timeout}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -140,21 +141,21 @@ func (a *HTTPLCUAdapter) DiscoverDevices(ctx context.Context, lcu *LCU) ([]LcuDe
 	return devices, nil
 }
 
-func (a *HTTPLCUAdapter) ApplyDimming(ctx context.Context, lcu *LCU, deviceUID string, intensity int) error {
+func (a *HTTPLCUAdapter) ApplyDimming(ctx context.Context, lcu *LCU, deviceUID string, intensity int, reason string, source string) error {
 	url := fmt.Sprintf("http://%s:%d/api/devices/%s/dimming", lcu.IPAddress, lcu.Port, deviceUID)
 
-	body := map[string]interface{}{
+	payload := map[string]interface{}{
 		"intensity": intensity,
-		"reason":    "Command from platform",
-		"source":    "admin",
+		"reason":    reason,
+		"source":    source,
 	}
 
-	jsonBody, err := json.Marshal(body)
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonBody))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(body))
 	if err != nil {
 		return err
 	}
@@ -164,16 +165,15 @@ func (a *HTTPLCUAdapter) ApplyDimming(ctx context.Context, lcu *LCU, deviceUID s
 		req.Header.Set("Authorization", "Bearer "+lcu.AuthToken)
 	}
 
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := &http.Client{Timeout: a.Timeout}
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
-		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("LCU returned status %d: %s", resp.StatusCode, string(respBody))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("LCU returned status %d", resp.StatusCode)
 	}
 
 	return nil

@@ -309,8 +309,8 @@ func buildLampadaire(form FormData) (Lampadaire, []string) {
 
 	return Lampadaire{
 		Reference:        form.Reference,
-		Latitude:         lat,
-		Longitude:        lng,
+		Latitude:         &lat,
+		Longitude:        &lng,
 		Zone:             form.Zone,
 		TypeDriver:       form.TypeDriver,
 		Protocole:        form.Protocole,
@@ -339,8 +339,8 @@ func handleGetMissingLocationLampadaires(db *sql.DB) gin.HandlerFunc {
 		}
 		missing := []Lampadaire{}
 		for _, l := range lampadaires {
-			// we assume location is missing if 0,0 but let's base on some logic later
-			if l.Latitude == 0 && l.Longitude == 0 {
+			// we assume location is missing if nil or 0,0
+			if l.Latitude == nil || l.Longitude == nil || (*l.Latitude == 0 && *l.Longitude == 0) {
 				missing = append(missing, l)
 			}
 		}

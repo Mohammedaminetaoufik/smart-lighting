@@ -83,3 +83,53 @@ func getDashboardStats(ctx context.Context, db *sql.DB) (*DashboardStats, error)
 
 	return stats, nil
 }
+
+func getEnergySummary(ctx context.Context, db *sql.DB) (*EnergySummary, error) {
+	summary := &EnergySummary{
+		ByZone: []EnergyZoneSummary{},
+	}
+
+	// Total calculations
+	err := db.QueryRowContext(ctx, `
+		SELECT 
+			COALESCE(SUM(puissance), 0),
+			COALESCE(SUM(puissance * intensite / 100.0), 0),
+			COALESCE(SUM(puissance - (puissance * intensite / 100.0)), 0)
+		FROM lampadaires 
+		WHERE archived_at IS NULL AND puissance IS NOT NULL
+	`).Scan(&summary.TotalNominalPowerW, &summary.EstimatedCurrentPowerW, &summary.EstimatedSavingW)
+
+	if err != nil {
+		return nil, err
+	}
+
+	if summary.TotalNominalPowerW > 0 {
+		summary.EstimatedSavingPercent = (summary.EstimatedSavingW / summary.TotalNominalPowerW) * 100
+	}
+
+	// By zone calculations
+	rows, err := db.QueryContext(ctx, `
+		SELECT 
+			COALESCE(zone, 'Sans zone'),
+			SUM(puissance),
+			SUM(puissance * intensite / 100.0),
+			SUM(puissance - (puissance * intensite / 100.0))
+		FROM lampadaires 
+		WHERE archived_at IS NULL AND puissance IS NOT NULL
+		GROUP BY zone
+	`)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var zs EnergyZoneSummary
+			if err := rows.Scan(&zs.Zone, &zs.TotalNominalPowerW, &zs.EstimatedCurrentPowerW, &zs.EstimatedSavingW); err == nil {
+				if zs.TotalNominalPowerW > 0 {
+					zs.EstimatedSavingPercent = (zs.EstimatedSavingW / zs.TotalNominalPowerW) * 100
+				}
+				summary.ByZone = append(summary.ByZone, zs)
+			}
+		}
+	}
+
+	return summary, nil
+}

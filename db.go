@@ -210,6 +210,9 @@ func ensureSchema(db *sql.DB) error {
 		ON lampadaires(lcu_id, device_uid)
 		WHERE device_uid IS NOT NULL;
 
+		ALTER TABLE lampadaires ALTER COLUMN latitude DROP NOT NULL;
+		ALTER TABLE lampadaires ALTER COLUMN longitude DROP NOT NULL;
+
 		CREATE TABLE IF NOT EXISTS sensor_measurements (
 			id SERIAL PRIMARY KEY,
 			lampadaire_id INTEGER NOT NULL REFERENCES lampadaires(id) ON DELETE CASCADE,
@@ -359,11 +362,12 @@ func getLampadaireByID(ctx context.Context, db *sql.DB, id int) (*Lampadaire, er
 	var item Lampadaire
 	var zone, typeDriver, protocole sql.NullString
 	var puissance, lcuID sql.NullInt64
+	var lat, lng sql.NullFloat64
 	var dateInstallation, lastSeenAt, lastCommandAt sql.NullTime
 	var address, quartier, lcuReference, driverReference, notes, deviceUID, nodeAddress sql.NullString
 
 	err := row.Scan(
-		&item.ID, &item.Reference, &item.Latitude, &item.Longitude,
+		&item.ID, &item.Reference, &lat, &lng,
 		&zone, &typeDriver, &protocole, &puissance,
 		&item.Etat, &item.Intensite, &dateInstallation,
 		&lastSeenAt, &lastCommandAt, &address, &quartier,
@@ -372,6 +376,13 @@ func getLampadaireByID(ctx context.Context, db *sql.DB, id int) (*Lampadaire, er
 	)
 	if err != nil {
 		return nil, err
+	}
+
+	if lat.Valid {
+		item.Latitude = &lat.Float64
+	}
+	if lng.Valid {
+		item.Longitude = &lng.Float64
 	}
 
 	if zone.Valid {
@@ -481,11 +492,12 @@ func listLampadaires(ctx context.Context, db *sql.DB, search map[string]string) 
 		var item Lampadaire
 		var zone, typeDriver, protocole sql.NullString
 		var puissance, lcuID sql.NullInt64
+		var lat, lng sql.NullFloat64
 		var dateInstallation, lastSeenAt, lastCommandAt sql.NullTime
 		var address, quartier, lcuReference, driverReference, notes, deviceUID, nodeAddress sql.NullString
 
 		if err := rows.Scan(
-			&item.ID, &item.Reference, &item.Latitude, &item.Longitude,
+			&item.ID, &item.Reference, &lat, &lng,
 			&zone, &typeDriver, &protocole, &puissance,
 			&item.Etat, &item.Intensite, &dateInstallation,
 			&lastSeenAt, &lastCommandAt, &address, &quartier,
@@ -494,6 +506,13 @@ func listLampadaires(ctx context.Context, db *sql.DB, search map[string]string) 
 			&item.HasCriticalAlert,
 		); err != nil {
 			return nil, err
+		}
+
+		if lat.Valid {
+			item.Latitude = &lat.Float64
+		}
+		if lng.Valid {
+			item.Longitude = &lng.Float64
 		}
 
 		if zone.Valid {
@@ -575,8 +594,63 @@ func insertLampadaire(ctx context.Context, db *sql.DB, l Lampadaire) error {
 	return err
 }
 
+func insertLampadaireTx(ctx context.Context, tx *sql.Tx, l Lampadaire) error {
+	_, err := tx.ExecContext(ctx, `
+		INSERT INTO lampadaires (
+			reference, latitude, longitude, zone, type_driver, protocole, puissance,
+			etat, intensite, date_installation, address, quartier, lcu_reference,
+			driver_reference, notes, lcu_id, device_uid, node_address, discovered_by_lcu, location_status
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+	`,
+		l.Reference, l.Latitude, l.Longitude,
+		nullString(l.Zone), nullString(l.TypeDriver), nullString(l.Protocole),
+		l.Puissance, l.Etat, l.Intensite, l.DateInstallation,
+		nullString(l.Address), nullString(l.Quartier), nullString(l.LCUReference),
+		nullString(l.DriverReference), nullString(l.Notes),
+		l.LCUID, nullString(l.DeviceUID), nullString(l.NodeAddress), l.DiscoveredByLCU, l.LocationStatus,
+	)
+	return err
+}
+
 func updateLampadaire(ctx context.Context, db *sql.DB, l Lampadaire) error {
 	_, err := db.ExecContext(ctx, `
+		UPDATE lampadaires
+		SET reference = $1,
+			latitude = $2,
+			longitude = $3,
+			zone = $4,
+			type_driver = $5,
+			protocole = $6,
+			puissance = $7,
+			etat = $8,
+			intensite = $9,
+			date_installation = $10,
+			address = $11,
+			quartier = $12,
+			lcu_reference = $13,
+			driver_reference = $14,
+			notes = $15,
+			lcu_id = $16,
+			device_uid = $17,
+			node_address = $18,
+			discovered_by_lcu = $19,
+			location_status = $20,
+			updated_at = NOW()
+		WHERE id = $21
+	`,
+		l.Reference, l.Latitude, l.Longitude,
+		nullString(l.Zone), nullString(l.TypeDriver), nullString(l.Protocole),
+		l.Puissance, l.Etat, l.Intensite, l.DateInstallation,
+		nullString(l.Address), nullString(l.Quartier), nullString(l.LCUReference),
+		nullString(l.DriverReference), nullString(l.Notes),
+		l.LCUID, nullString(l.DeviceUID), nullString(l.NodeAddress), l.DiscoveredByLCU, l.LocationStatus,
+		l.ID,
+	)
+	return err
+}
+
+func updateLampadaireTx(ctx context.Context, tx *sql.Tx, l Lampadaire) error {
+	_, err := tx.ExecContext(ctx, `
 		UPDATE lampadaires
 		SET reference = $1,
 			latitude = $2,
@@ -765,6 +839,14 @@ func insertLCUSyncLog(ctx context.Context, db *sql.DB, log LCUSyncLog) error {
 	return err
 }
 
+func insertLCUSyncLogTx(ctx context.Context, tx *sql.Tx, log LCUSyncLog) error {
+	_, err := tx.ExecContext(ctx, `
+		INSERT INTO lcu_sync_logs (lcu_id, status, message, discovered_count, created_count, updated_count, failed_count)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`, log.LCUID, log.Status, log.Message, log.DiscoveredCount, log.CreatedCount, log.UpdatedCount, log.FailedCount)
+	return err
+}
+
 func listLampadairesByLCU(ctx context.Context, db *sql.DB, lcuID int) ([]Lampadaire, error) {
 
 	// We'll modify listLampadaires to handle lcu_id filter or just write a specialized query
@@ -789,11 +871,12 @@ func listLampadairesByLCU(ctx context.Context, db *sql.DB, lcuID int) ([]Lampada
 		var item Lampadaire
 		var zone, typeDriver, protocole sql.NullString
 		var puissance, lid sql.NullInt64
+		var lat, lng sql.NullFloat64
 		var dateInstallation, lastSeenAt, lastCommandAt sql.NullTime
 		var address, quartier, lcuReference, driverReference, notes, deviceUID, nodeAddress sql.NullString
 
 		if err := rows.Scan(
-			&item.ID, &item.Reference, &item.Latitude, &item.Longitude,
+			&item.ID, &item.Reference, &lat, &lng,
 			&zone, &typeDriver, &protocole, &puissance,
 			&item.Etat, &item.Intensite, &dateInstallation,
 			&lastSeenAt, &lastCommandAt, &address, &quartier,
@@ -802,6 +885,13 @@ func listLampadairesByLCU(ctx context.Context, db *sql.DB, lcuID int) ([]Lampada
 			&item.HasCriticalAlert,
 		); err != nil {
 			return nil, err
+		}
+
+		if lat.Valid {
+			item.Latitude = &lat.Float64
+		}
+		if lng.Valid {
+			item.Longitude = &lng.Float64
 		}
 
 		if zone.Valid {
@@ -882,11 +972,12 @@ func listLampadairesMissingLocation(ctx context.Context, db *sql.DB) ([]Lampadai
 		var item Lampadaire
 		var zone, typeDriver, protocole sql.NullString
 		var puissance, lid sql.NullInt64
+		var lat, lng sql.NullFloat64
 		var dateInstallation, lastSeenAt, lastCommandAt sql.NullTime
 		var address, quartier, lcuReference, driverReference, notes, deviceUID, nodeAddress sql.NullString
 
 		if err := rows.Scan(
-			&item.ID, &item.Reference, &item.Latitude, &item.Longitude,
+			&item.ID, &item.Reference, &lat, &lng,
 			&zone, &typeDriver, &protocole, &puissance,
 			&item.Etat, &item.Intensite, &dateInstallation,
 			&lastSeenAt, &lastCommandAt, &address, &quartier,
@@ -895,6 +986,13 @@ func listLampadairesMissingLocation(ctx context.Context, db *sql.DB) ([]Lampadai
 			&item.HasCriticalAlert,
 		); err != nil {
 			return nil, err
+		}
+
+		if lat.Valid {
+			item.Latitude = &lat.Float64
+		}
+		if lng.Valid {
+			item.Longitude = &lng.Float64
 		}
 
 		if zone.Valid {
@@ -994,46 +1092,4 @@ func markInactiveLampadairesOffline(ctx context.Context, db *sql.DB) error {
 	return nil
 }
 
-func getEnergySummary(ctx context.Context, db *sql.DB) (map[string]interface{}, error) {
-	lampadaires, err := listLampadaires(ctx, db, map[string]string{})
-	if err != nil {
-		return nil, err
-	}
-	totalNominal := 0.0
-	totalEst := 0.0
-	zoneMap := map[string]struct {
-		LampCount int
-		Nominal   float64
-		Current   float64
-	}{}
-	for _, l := range lampadaires {
-		z := l.Zone
-		if z == "" {
-			z = "Inconnue"
-		}
-		stats := zoneMap[z]
-		stats.LampCount++
-		nom := 0.0
-		if l.Puissance != nil {
-			nom = float64(*l.Puissance)
-		}
-		est := nom * (float64(l.Intensite) / 100.0)
-		totalNominal += nom
-		totalEst += est
-		stats.Nominal += nom
-		stats.Current += est
-		zoneMap[z] = stats
-	}
-	byZone := []map[string]interface{}{}
-	for z, stats := range zoneMap {
-		byZone = append(byZone, map[string]interface{}{
-			"zone": z, "lamp_count": stats.LampCount, "nominal_power_w": stats.Nominal, "current_power_w": stats.Current, "saving_w": stats.Nominal - stats.Current,
-		})
-	}
-	savingW := totalNominal - totalEst
-	savingPercent := 0.0
-	if totalNominal > 0 {
-		savingPercent = (savingW / totalNominal) * 100
-	}
-	return map[string]interface{}{"total_nominal_power_w": totalNominal, "estimated_current_power_w": totalEst, "estimated_saving_w": savingW, "estimated_saving_percent": savingPercent, "by_zone": byZone}, nil
-}
+

@@ -151,10 +151,18 @@ func handleSyncLCU(db *sql.DB, adapter LCUAdapter) gin.HandlerFunc {
 		updated := 0
 		failed := 0
 
+		// Start Transaction
+		tx, err := db.BeginTx(c.Request.Context(), nil)
+		if err != nil {
+			respondError(c, http.StatusInternalServerError, "Erreur transaction")
+			return
+		}
+		defer tx.Rollback()
+
 		for _, d := range devices {
 			// Find existing lampadaire by device_uid and lcu_id
 			var existingID int
-			err := db.QueryRowContext(c.Request.Context(), "SELECT id FROM lampadaires WHERE lcu_id = $1 AND device_uid = $2", id, d.DeviceUID).Scan(&existingID)
+			err := tx.QueryRowContext(c.Request.Context(), "SELECT id FROM lampadaires WHERE lcu_id = $1 AND device_uid = $2", id, d.DeviceUID).Scan(&existingID)
 
 			locStatus := "confirmed"
 			if d.Latitude == nil || d.Longitude == nil {
@@ -163,8 +171,8 @@ func handleSyncLCU(db *sql.DB, adapter LCUAdapter) gin.HandlerFunc {
 
 			lamp := Lampadaire{
 				Reference:       d.Reference,
-				Latitude:        0,
-				Longitude:       0,
+				Latitude:        d.Latitude,
+				Longitude:       d.Longitude,
 				Zone:            d.Zone,
 				TypeDriver:      d.TypeDriver,
 				Protocole:       d.Protocole,
@@ -177,16 +185,10 @@ func handleSyncLCU(db *sql.DB, adapter LCUAdapter) gin.HandlerFunc {
 				DiscoveredByLCU: true,
 				LocationStatus:  locStatus,
 			}
-			if d.Latitude != nil {
-				lamp.Latitude = *d.Latitude
-			}
-			if d.Longitude != nil {
-				lamp.Longitude = *d.Longitude
-			}
 
 			if err == sql.ErrNoRows {
 				// Insert
-				if err := insertLampadaire(c.Request.Context(), db, lamp); err != nil {
+				if err := insertLampadaireTx(c.Request.Context(), tx, lamp); err != nil {
 					failed++
 				} else {
 					created++
@@ -194,7 +196,7 @@ func handleSyncLCU(db *sql.DB, adapter LCUAdapter) gin.HandlerFunc {
 			} else if err == nil {
 				// Update
 				lamp.ID = existingID
-				if err := updateLampadaire(c.Request.Context(), db, lamp); err != nil {
+				if err := updateLampadaireTx(c.Request.Context(), tx, lamp); err != nil {
 					failed++
 				} else {
 					updated++
@@ -213,10 +215,15 @@ func handleSyncLCU(db *sql.DB, adapter LCUAdapter) gin.HandlerFunc {
 			UpdatedCount:    updated,
 			FailedCount:     failed,
 		}
-		insertLCUSyncLog(c.Request.Context(), db, log)
+		insertLCUSyncLogTx(c.Request.Context(), tx, log)
 
 		// Update LCU last sync
-		db.ExecContext(c.Request.Context(), "UPDATE lcus SET last_sync_at = NOW() WHERE id = $1", id)
+		tx.ExecContext(c.Request.Context(), "UPDATE lcus SET last_sync_at = NOW() WHERE id = $1", id)
+
+		if err := tx.Commit(); err != nil {
+			respondError(c, http.StatusInternalServerError, "Erreur commit")
+			return
+		}
 
 		respondJSON(c, http.StatusOK, log)
 	}

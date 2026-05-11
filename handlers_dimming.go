@@ -70,7 +70,7 @@ func handlePostDimming(db *sql.DB, adapter LCUAdapter) gin.HandlerFunc {
 		if lcuID.Valid && deviceUID.Valid && deviceUID.String != "" {
 			lcu, err := getLCUByID(c.Request.Context(), db, int(lcuID.Int64))
 			if err == nil {
-				err = adapter.ApplyDimming(c.Request.Context(), lcu, deviceUID.String, body.NewIntensity)
+				err = adapter.ApplyDimming(c.Request.Context(), lcu, deviceUID.String, body.NewIntensity, body.Reason, body.Source)
 				if err != nil {
 					tx.ExecContext(c.Request.Context(), "UPDATE dimming_commands SET status = 'failed' WHERE id = $1", cmdID)
 					createAlertIfNotExists(c.Request.Context(), tx, id, "commande_non_appliquee", "critical", "Échec LCU: "+err.Error())

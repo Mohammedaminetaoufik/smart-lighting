@@ -4,10 +4,10 @@ import "time"
 
 // Lampadaire represents a street light in the system.
 type Lampadaire struct {
-	ID               int     `json:"id"`
-	Reference        string  `json:"reference"`
-	Latitude         float64 `json:"latitude"`
-	Longitude        float64 `json:"longitude"`
+	ID               int      `json:"id"`
+	Reference        string   `json:"reference"`
+	Latitude         *float64 `json:"latitude,omitempty"`
+	Longitude        *float64 `json:"longitude,omitempty"`
 	Zone             string  `json:"zone,omitempty"`
 	TypeDriver       string  `json:"type_driver,omitempty"`
 	Protocole        string  `json:"protocole,omitempty"`
@@ -246,4 +246,20 @@ type AccessLog struct {
 	UserID    int    `json:"user_id"`
 	Action    string `json:"action"`
 	CreatedAt string `json:"created_at"`
+}
+
+type EnergySummary struct {
+	TotalNominalPowerW     float64             `json:"total_nominal_power_w"`
+	EstimatedCurrentPowerW float64             `json:"estimated_current_power_w"`
+	EstimatedSavingW       float64             `json:"estimated_saving_w"`
+	EstimatedSavingPercent float64             `json:"estimated_saving_percent"`
+	ByZone                 []EnergyZoneSummary `json:"by_zone"`
+}
+
+type EnergyZoneSummary struct {
+	Zone                   string  `json:"zone"`
+	TotalNominalPowerW     float64 `json:"total_nominal_power_w"`
+	EstimatedCurrentPowerW float64 `json:"estimated_current_power_w"`
+	EstimatedSavingW       float64 `json:"estimated_saving_w"`
+	EstimatedSavingPercent float64 `json:"estimated_saving_percent"`
 }

@@ -56,43 +56,50 @@ func main() {
 	// JSON API
 	api := router.Group("/api")
 	{
+		// Users & Logs
 		api.GET("/users", handleGetUsers(db))
 		api.POST("/users", handleCreateUser(db))
 		api.GET("/logs", handleGetLogs(db))
-		api.GET("/lampadaires/:id", handleGetLampadaireJSON(db))
-		api.GET("/dashboard/stats", handleGetDashboardStats(db))
-		api.GET("/energy/summary", handleGetEnergySummary(db))
+
+		// LCU API
 		api.GET("/lcus", handleListLCUsJSON(db))
 		api.GET("/lcus/:id", handleGetLCUJSON(db))
 		api.POST("/lcus/:id/test", handleTestLCU(db, lcuAdapter))
 		api.POST("/lcus/:id/sync", handleSyncLCU(db, lcuAdapter))
 		api.GET("/lcus/:id/lampadaires", handleGetLCULampadaires(db))
 
-		// Telemetry
+		// Lampadaires API
+		api.GET("/lampadaires/:id", handleGetLampadaireJSON(db))
+		api.GET("/lampadaires/missing-location", handleListMissingLocation(db))
+		api.POST("/lampadaires/:id/location", handleUpdateLampadaireLocationAPI(db))
+
+		// Telemetry API
 		api.POST("/telemetry", handlePostTelemetry(db))
 		api.GET("/lampadaires/:id/telemetry", handleGetTelemetry(db))
 		api.GET("/lampadaires/:id/telemetry/latest", handleGetTelemetryLatest(db))
 
-		// Dimming
+		// Dimming API
 		api.POST("/lampadaires/:id/dimming", handlePostDimming(db, lcuAdapter))
 		api.GET("/lampadaires/:id/dimming", handleGetDimmingHistory(db))
 
-		// Alerts
+		// Alerts API
 		api.GET("/alerts", handleGetAlerts(db))
 		api.GET("/alerts/counts", handleGetAlertCounts(db))
 		api.GET("/alerts/summary", handleGetAlertSummary(db))
 		api.POST("/alerts/:id/resolve", handleResolveAlert(db))
 
-		// Calculator
+		// Calculator API
 		api.POST("/calculateur/run/:id", handleRunCalculator(db, lcuAdapter))
 		api.POST("/calculateur/run-all", handleRunCalculatorAll(db, lcuAdapter))
 		api.GET("/lampadaires/:id/decisions", handleGetDecisions(db))
 
-		// Location Correction
-		api.GET("/lampadaires/missing-location", handleListMissingLocation(db))
-		api.POST("/lampadaires/:id/location", handleUpdateLampadaireLocationAPI(db))
+		// Dashboard API
+		api.GET("/dashboard/stats", handleGetDashboardStats(db))
 
-		// Simulator
+		// Energy API
+		api.GET("/energy/summary", handleGetEnergySummary(db))
+
+		// Simulator API
 		api.POST("/simulator/telemetry/:id", handleSimulateTelemetry(db))
 		api.POST("/simulator/telemetry/all", handleSimulateAll(db))
 	}
@@ -129,5 +136,12 @@ func main() {
 }
 
 func handleGetEnergySummary(db *sql.DB) gin.HandlerFunc {
-	return func(c *gin.Context) { respondJSON(c, 200, map[string]interface{}{}) }
+	return func(c *gin.Context) {
+		summary, err := getEnergySummary(c.Request.Context(), db)
+		if err != nil {
+			respondError(c, http.StatusInternalServerError, "Erreur lors du calcul énergétique.")
+			return
+		}
+		respondJSON(c, http.StatusOK, summary)
+	}
 }
