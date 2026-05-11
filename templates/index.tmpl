@@ -1,0 +1,420 @@
+<!doctype html>
+<html lang="fr">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Smart Lighting — Télégestion intelligente</title>
+    <meta name="description" content="Plateforme de télégestion intelligente des lampadaires avec carte interactive, supervision IoT, alertes et dimming.">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+    <link rel="stylesheet" href="/static/css/style.css?v=10">
+</head>
+<body>
+<div class="layout">
+    <aside class="sidebar">
+        <div class="sidebar-brand">⚡ Smart Lighting<small>Télégestion IoT</small></div>
+        <button class="nav-btn active" data-page="dashboard" type="button"><span class="nav-icon">📊</span> Dashboard</button>
+        <button class="nav-btn" data-page="carte" type="button"><span class="nav-icon">🗺️</span> Carte</button>
+        <div class="sidebar-section">Gestion du parc</div>
+        <button class="nav-btn" data-page="lcu" type="button"><span class="nav-icon">🌐</span> LCU / Gateways</button>
+        <button class="nav-btn" data-page="liste" type="button"><span class="nav-icon">📋</span> Lampadaires</button>
+        <button class="nav-btn" data-page="localiser" type="button"><span class="nav-icon">📍</span> À localiser</button>
+        <div class="sidebar-section">Pilotage intelligent</div>
+        <button class="nav-btn" data-page="calculateur" type="button"><span class="nav-icon">🧠</span> Décisions</button>
+        <button class="nav-btn" data-page="dimming" type="button"><span class="nav-icon">💡</span> Dimming / Scénarios</button>
+        <div class="sidebar-section">Maintenance & Sécurité</div>
+        <button class="nav-btn" data-page="alertes" type="button"><span class="nav-icon">🔔</span> Alertes</button>
+        <button class="nav-btn" data-page="interventions" type="button"><span class="nav-icon">🔧</span> Interventions</button>
+        <div class="sidebar-section">Analyse & Admin</div>
+        <button class="nav-btn" data-page="energie" type="button"><span class="nav-icon">⚡</span> Analyse énergétique</button>
+        <button class="nav-btn" data-page="admin" type="button"><span class="nav-icon">⚙️</span> Administration</button>
+        
+        <!-- Outils de démo (garder en bas ou cacher) -->
+        <button class="nav-btn" data-page="simulation" type="button" style="margin-top:auto;"><span class="nav-icon">🔬</span> Simulation IoT</button>
+    </aside>
+
+    <div class="content">
+        {{ if .Success }}<div class="alert-banner success">✅ Opération réussie.</div>{{ end }}
+        {{ if .Errors }}<div class="alert-banner error">{{ range .Errors }}<div>{{ . }}</div>{{ end }}</div>{{ end }}
+
+        <!-- DASHBOARD -->
+        <div id="pageDashboard" class="page-view active-view">
+            <h2 style="margin-bottom:16px;">Dashboard</h2>
+            <div id="dashStats" class="stats-grid"></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;">
+                <div class="panel"><h3>🔔 Dernières alertes</h3><ul id="dashAlerts" class="activity-list"><li>Chargement...</li></ul></div>
+                <div class="panel"><h3>💡 Dernières commandes</h3><ul id="dashCommands" class="activity-list"><li>Chargement...</li></ul></div>
+                <div class="panel"><h3>📡 Dernière télémétrie</h3><ul id="dashTelemetry" class="activity-list"><li>Chargement...</li></ul></div>
+            </div>
+        </div>
+
+        <!-- CARTE -->
+        <div id="pageCarte" class="page-view">
+            <div class="filter-bar">
+                <input type="text" id="filterQ" placeholder="🔍 Rechercher...">
+                <select id="filterEtat"><option value="">Tous les états</option><option value="online">Online</option><option value="offline">Offline</option><option value="maintenance">Maintenance</option></select>
+                <select id="filterZone"><option value="">Toutes les zones</option></select>
+                <select id="filterDriver"><option value="">Tous les drivers</option><option value="DALI">DALI</option><option value="0-10V">0-10V</option><option value="PWM">PWM</option></select>
+                <button class="btn btn-primary btn-sm" onclick="applyFilters()">Filtrer</button>
+            </div>
+            <div class="map-legend">
+                <div class="legend-item"><span class="legend-dot" style="background:#22c55e"></span> Online</div>
+                <div class="legend-item"><span class="legend-dot" style="background:#ef4444"></span> Offline</div>
+                <div class="legend-item"><span class="legend-dot" style="background:#f59e0b"></span> Maintenance</div>
+                <div class="legend-item"><span class="legend-dot" style="border: 2px solid #fff; background: #1e293b; border-radius: 2px;"></span> Gateway</div>
+                <div class="legend-item"><span class="legend-dot" style="background:#3b82f6"></span> Sélectionné</div>
+            </div>
+            <div class="map-layout">
+                <div id="map"></div>
+                <div class="panel" id="sidePanel">
+                    <div style="display:flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                        <h3 id="formMode" style="margin:0;">Ajouter un lampadaire</h3>
+                        <button class="btn btn-secondary btn-sm" onclick="openLCUModal()">🌐 Gérer LCUs</button>
+                    </div>
+                    <p class="panel-subtitle">Cliquez sur la carte pour choisir un emplacement.</p>
+                    <div id="helper" style="margin-bottom:10px;font-size:13px;color:var(--text-dim);">Aucun emplacement sélectionné.</div>
+                    <form id="formLampadaire" class="form-hidden" method="POST" action="/lampadaires">
+                        <input type="hidden" id="lampadaire_id" name="lampadaire_id" value="">
+                        <div class="field"><label for="reference">Référence</label><input id="reference" type="text" name="reference" value="{{ .Form.Reference }}" required></div>
+                        <input type="hidden" id="latitude" name="latitude" value="{{ .Form.Latitude }}">
+                        <input type="hidden" id="longitude" name="longitude" value="{{ .Form.Longitude }}">
+                        
+                        <div class="field"><label for="lcu_id">LCU / Gateway associée</label>
+                            <select id="lcu_id" name="lcu_id">
+                                <option value="">Aucune (Manuel)</option>
+                                {{ range .LCUs }}
+                                <option value="{{ .ID }}" {{ if eq $.Form.LCUID (print .ID) }}selected{{ end }}>{{ .Reference }} ({{ .IPAddress }})</option>
+                                {{ end }}
+                            </select>
+                        </div>
+
+                        <div class="coords">
+                            <div class="field"><label>Latitude</label><input id="latitude_display" type="text" value="{{ .Form.Latitude }}" readonly></div>
+                            <div class="field"><label>Longitude</label><input id="longitude_display" type="text" value="{{ .Form.Longitude }}" readonly></div>
+                        </div>
+                        <div class="field"><label for="zone">Zone</label><input id="zone" type="text" name="zone" value="{{ .Form.Zone }}"></div>
+                        
+                        <div class="coords">
+                            <div class="field"><label for="device_uid">Device UID</label><input id="device_uid" type="text" name="device_uid" value="{{ .Form.DeviceUID }}" placeholder="UID IoT"></div>
+                            <div class="field"><label for="node_address">Node Address</label><input id="node_address" type="text" name="node_address" value="{{ .Form.NodeAddress }}" placeholder="0x00"></div>
+                        </div>
+
+                        <div class="field"><label for="type_driver">Type driver</label>
+                            <select id="type_driver" name="type_driver">
+                                <option value="">Sélectionner</option>
+                                <option value="DALI" {{ if eq .Form.TypeDriver "DALI" }}selected{{ end }}>DALI</option>
+                                <option value="0-10V" {{ if eq .Form.TypeDriver "0-10V" }}selected{{ end }}>0-10V</option>
+                                <option value="PWM" {{ if eq .Form.TypeDriver "PWM" }}selected{{ end }}>PWM</option>
+                            </select>
+                        </div>
+                        <div class="field"><label for="protocole">Protocole</label><input id="protocole" type="text" name="protocole" value="{{ .Form.Protocole }}"></div>
+                        <div class="field"><label for="puissance">Puissance (W)</label><input id="puissance" type="number" min="0" name="puissance" value="{{ .Form.Puissance }}"></div>
+                        <div class="field"><label for="etat">État</label>
+                            <select id="etat" name="etat">
+                                <option value="offline" {{ if or (eq .Form.Etat "") (eq .Form.Etat "offline") }}selected{{ end }}>Offline</option>
+                                <option value="online" {{ if eq .Form.Etat "online" }}selected{{ end }}>Online</option>
+                                <option value="maintenance" {{ if eq .Form.Etat "maintenance" }}selected{{ end }}>Maintenance</option>
+                            </select>
+                        </div>
+                        <div class="field"><label for="intensite">Intensité</label>
+                            <div class="slider-display"><input id="intensite" type="range" min="0" max="100" name="intensite" value="{{ if .Form.Intensite }}{{ .Form.Intensite }}{{ else }}0{{ end }}"><span class="slider-val" id="intensite_value">{{ if .Form.Intensite }}{{ .Form.Intensite }}{{ else }}0{{ end }}</span></div>
+                        </div>
+                        <div class="field"><label for="date_installation">Date installation</label><input id="date_installation" type="date" name="date_installation" value="{{ .Form.DateInstallation }}"></div>
+                        
+                        <div class="field"><label for="address">Adresse exacte</label><input id="address" type="text" name="address" value="{{ .Form.Address }}" placeholder="Ex: 12 Rue des Fleurs"></div>
+                        
+                        <div class="field"><label for="notes">Notes techniques</label><textarea id="notes" name="notes" rows="2">{{ .Form.Notes }}</textarea></div>
+                        <div style="display:flex;gap:8px;margin-top:8px;">
+                            <button id="submitButton" type="submit" class="btn btn-primary btn-block">Ajouter</button>
+                            <button id="cancelEdit" type="button" class="btn btn-secondary form-hidden" onclick="setCreateMode()">Annuler</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            <!-- Detail panel (shown when "Voir fiche" is clicked) -->
+            <div id="detailPanel" class="panel hidden" style="margin-top:16px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+                    <h3 id="detailTitle">Fiche lampadaire</h3>
+                    <button class="btn btn-secondary btn-sm" onclick="closeDetail()">✕ Fermer</button>
+                </div>
+                <div id="detailContent"></div>
+            </div>
+        </div>
+
+        <!-- LCUs -->
+        <div id="pageLcu" class="page-view">
+            <div style="display:flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <h2 style="margin:0;">LCU / Gateways</h2>
+                <button class="btn btn-primary" onclick="openLCUModal()">➕ Ajouter LCU</button>
+            </div>
+            <div id="lcuList" class="lcu-card-grid">
+                <!-- Rempli par JS -->
+            </div>
+        </div>
+
+        <!-- LISTE -->
+        <div id="pageListe" class="page-view">
+            <h2 style="margin-bottom:16px;">Liste des lampadaires</h2>
+            <div class="panel table-wrap">
+            {{ if .Lampadaires }}
+                <table class="data-table">
+                    <thead><tr><th>Référence</th><th>État</th><th>Localisation</th><th>Zone</th><th>LCU</th><th>UID</th><th>Actions</th></tr></thead>
+                    <tbody>
+                    {{ range .Lampadaires }}
+                    <tr>
+                        <td><strong>{{ .Reference }}</strong></td>
+                        <td><span class="badge {{ .Etat }}">{{ .Etat }}</span></td>
+                        <td><span class="badge {{ .LocationStatus }}">{{ .LocationStatus }}</span></td>
+                        <td>{{ .Zone }}</td>
+                        <td>{{ if .LCUID }}{{ .LCUReference }}{{ else }}—{{ end }}</td>
+                        <td><code style="font-size:11px;">{{ .DeviceUID }}</code></td>
+                        <td>
+                            <button class="btn btn-secondary btn-sm" onclick="showDetailByID({{ .ID }})">Voir</button>
+                            <button class="btn btn-primary btn-sm" onclick="editLamp({{ .ID }})">Modifier</button>
+                        </td>
+                    </tr>
+                    {{ end }}
+                    </tbody>
+                </table>
+            {{ else }}
+                <p style="color:var(--text-dim);">Aucun lampadaire enregistré.</p>
+            {{ end }}
+            </div>
+        </div>
+
+        <!-- LOCALISER -->
+        <div id="pageLocaliser" class="page-view">
+            <h2 style="margin-bottom:16px;">Lampadaires à localiser</h2>
+            <p class="panel-subtitle">Ces équipements ont été synchronisés depuis une LCU mais n'ont pas encore de coordonnées GPS confirmées.</p>
+            <div class="panel table-wrap">
+                <table class="data-table">
+                    <thead><tr><th>Référence</th><th>LCU</th><th>Device UID</th><th>Node</th><th>Zone</th><th>Action</th></tr></thead>
+                    <tbody id="missingLocationBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- ARCHIVES -->
+        <div id="pageArchives" class="page-view">
+            <h2 style="margin-bottom:16px;">Archives (Lampadaires supprimés)</h2>
+            <div class="panel table-wrap">
+            {{ if .ArchivedLampadaires }}
+                <table class="data-table">
+                    <thead><tr><th>Référence</th><th>Zone</th><th>Driver</th><th>Puissance</th><th>Actions</th></tr></thead>
+                    <tbody>
+                    {{ range .ArchivedLampadaires }}
+                    <tr>
+                        <td><strong>{{ .Reference }}</strong></td>
+                        <td>{{ .Zone }}</td>
+                        <td>{{ .TypeDriver }}</td>
+                        <td>{{ if .Puissance }}{{ .Puissance }}W{{ else }}—{{ end }}</td>
+                        <td>
+                            <form method="POST" action="/lampadaires/{{ .ID }}/restore" style="display:inline;">
+                                <button type="submit" class="btn btn-primary btn-sm">Restaurer</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {{ end }}
+                    </tbody>
+                </table>
+            {{ else }}
+                <p style="color:var(--text-dim);">Aucun lampadaire dans les archives.</p>
+            {{ end }}
+            </div>
+        </div>
+
+        <!-- ALERTES -->
+        <div id="pageAlertes" class="page-view">
+            <h2 style="margin-bottom:16px;">Alertes</h2>
+            <div id="alertCounts" class="stats-grid"></div>
+            <div class="panel">
+                <div style="display:flex;gap:8px;margin-bottom:14px;">
+                    <select id="alertFilterStatus" onchange="loadAlerts()"><option value="open">Ouvertes</option><option value="resolved">Résolues</option><option value="">Toutes</option></select>
+                    <select id="alertFilterSeverity" onchange="loadAlerts()"><option value="">Toutes sévérités</option><option value="critical">Critique</option><option value="warning">Warning</option><option value="info">Info</option></select>
+                </div>
+                <div class="table-wrap"><table class="data-table"><thead><tr><th>Date</th><th>Lampadaire</th><th>Type</th><th>Sévérité</th><th>Message</th><th>Statut</th><th>Action</th></tr></thead><tbody id="alertsBody"></tbody></table></div>
+            </div>
+        </div>
+
+        <!-- DIMMING -->
+        <div id="pageDimming" class="page-view">
+            <h2 style="margin-bottom:16px;">Commande Dimming</h2>
+            <div class="panel">
+                <div class="field"><label>Lampadaire</label>
+                    <select id="dimmingLamp"></select>
+                </div>
+                <div class="field"><label>Intensité cible</label>
+                    <div class="slider-display"><input type="range" id="dimmingSlider" min="0" max="100" value="50"><span class="slider-val" id="dimmingSliderVal">50</span></div>
+                </div>
+                <div class="field"><label>Raison</label><input type="text" id="dimmingReason" placeholder="Commande manuelle"></div>
+                <button class="btn btn-primary" onclick="applyDimming()">💡 Appliquer le dimming</button>
+                <div id="dimmingResult" style="margin-top:12px;"></div>
+            </div>
+            <div class="panel" style="margin-top:16px;">
+                <h3>Historique des commandes</h3>
+                <div class="table-wrap"><table class="data-table"><thead><tr><th>Date</th><th>Lampadaire</th><th>Source</th><th>Ancien</th><th>Nouveau</th><th>Raison</th><th>Statut</th></tr></thead><tbody id="dimmingHistory"></tbody></table></div>
+            </div>
+        </div>
+
+        <!-- CALCULATEUR -->
+        <div id="pageCalculateur" class="page-view">
+            <h2 style="margin-bottom:16px;">Calculateur Intelligent</h2>
+            <div class="panel">
+                <div class="field"><label>Lampadaire</label><select id="calcLamp"></select></div>
+                <div style="display:flex;gap:8px;margin-bottom:12px;">
+                    <button class="btn btn-secondary" onclick="runCalc(false)">🔍 Analyser seulement</button>
+                    <button class="btn btn-primary" onclick="runCalc(true)">⚡ Analyser et appliquer</button>
+                    <button class="btn btn-warning" onclick="runCalcAll()">🚀 Lancer pour tous</button>
+                </div>
+                <div id="calcResult"></div>
+            </div>
+            <div class="panel" style="margin-top:16px;">
+                <h3>Dernières décisions</h3>
+                <div class="table-wrap"><table class="data-table"><thead><tr><th>Date</th><th>Lampadaire</th><th>Recommandé</th><th>Raison</th><th>Confiance</th><th>Appliqué</th></tr></thead><tbody id="calcHistory"></tbody></table></div>
+            </div>
+        </div>
+
+        <!-- SIMULATION -->
+        <div id="pageSimulation" class="page-view">
+            <h2 style="margin-bottom:16px;">Simulation IoT</h2>
+            <div class="panel">
+                <div class="field"><label>Lampadaire</label><select id="simLamp"></select></div>
+                <div style="display:flex;gap:8px;margin-bottom:12px;">
+                    <button class="btn btn-primary" onclick="simulateOne()">📡 Générer une mesure</button>
+                    <button class="btn btn-warning" onclick="simulateAll()">🚀 Générer pour tous</button>
+                    <button class="btn btn-secondary" id="autoSimBtn" onclick="toggleAutoSim()">▶ Auto-simulation</button>
+                </div>
+                <div id="simResult"></div>
+            </div>
+            <div class="panel" style="margin-top:16px;">
+                <h3>Dernières mesures</h3>
+                <div class="table-wrap"><table class="data-table"><thead><tr><th>Date</th><th>Luminosité</th><th>Présence</th><th>Temp.</th><th>Humidité</th><th>Puissance</th></tr></thead><tbody id="simHistory"></tbody></table></div>
+            </div>
+        </div>
+
+        <!-- INTERVENTIONS -->
+        <div id="pageInterventions" class="page-view">
+            <h2 style="margin-bottom:16px;">Interventions techniques</h2>
+            <div style="display:flex;justify-content:space-between;margin-bottom:16px;">
+                <p>Gestion des tickets et déplacements suite aux alertes.</p>
+                <button class="btn btn-primary" onclick="alert('Création manuelle non implémentée.')">➕ Nouvelle intervention</button>
+            </div>
+            <div class="panel table-wrap">
+                <table class="data-table">
+                    <thead><tr><th>ID</th><th>Alerte source</th><th>Équipement</th><th>Priorité</th><th>Statut</th><th>Assigné à</th><th>Date</th></tr></thead>
+                    <tbody id="interventionsList">
+                        <tr><td colspan="7" style="text-align:center;color:var(--text-dim);">Chargement...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- ENERGIE -->
+        <div id="pageEnergie" class="page-view">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                <h2 style="margin:0;">Analyse Mastère Énergétique</h2>
+                <button class="btn btn-secondary" onclick="exportEnergyReport()">⬇️ Exporter rapport CSV</button>
+            </div>
+            <div id="energieStats" class="stats-grid" style="margin-bottom:20px;">
+                <div class="stat-card"><div class="stat-title">Puissance Nominale Totale</div><div class="stat-value" id="energyNominal">0 W</div></div>
+                <div class="stat-card"><div class="stat-title">Puissance Actuelle (Estimée)</div><div class="stat-value" id="energyCurrent">0 W</div></div>
+                <div class="stat-card"><div class="stat-title">Économie Actuelle</div><div class="stat-value" id="energySavingW">0 W</div></div>
+                <div class="stat-card"><div class="stat-title">Taux d'Économie</div><div class="stat-value" id="energySavingPercent">0 %</div></div>
+            </div>
+            <div class="panel table-wrap">
+                <h3 style="margin-bottom:10px;">Répartition par zone</h3>
+                <table class="data-table">
+                    <thead><tr><th>Zone</th><th>Lampadaires limités</th><th>Puissance max</th><th>Consommation est.</th><th>Économie</th></tr></thead>
+                    <tbody id="energyZoneList">
+                        <tr><td colspan="5" style="text-align:center;color:var(--text-dim);">Chargement...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- ADMIN -->
+        <div id="pageAdmin" class="page-view">
+            <h2 style="margin-bottom:16px;">Administration et accès</h2>
+            <div style="display:grid;grid-template-columns:2fr 1fr;gap:20px;">
+                <div class="panel table-wrap">
+                    <div style="display:flex;justify-content:space-between;margin-bottom:16px;">
+                        <h3 style="margin:0;">Utilisateurs</h3>
+                        <button class="btn btn-primary btn-sm" onclick="alert('Non impl')">➕ Ajouter</button>
+                    </div>
+                    <table class="data-table">
+                        <thead><tr><th>Nom</th><th>Email</th><th>Rôle</th><th>Statut</th><th>Actions</th></tr></thead>
+                        <tbody id="adminUserList">
+                            <tr><td colspan="5" style="text-align:center;color:var(--text-dim);">Chargement...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="panel">
+                    <h3 style="margin-bottom:16px;">Journal des accès</h3>
+                    <ul class="activity-list" id="adminAccessLogs">
+                        <li>Chargement...</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="panel" style="margin-top:20px;">
+                <h3>Paramètres Système</h3>
+                <div style="display:flex;gap:20px;align-items:center;margin-top:10px;">
+                    <label style="display:flex;align-items:center;gap:8px;">
+                        <input type="checkbox" id="settingAutoCalc" onchange="toggleSetting('auto_calculator_enabled', this.checked)">
+                        Calculateur Automatique activé globalement
+                    </label>
+                    <label style="display:flex;align-items:center;gap:8px;">
+                        <input type="checkbox" id="settingAutoApply" onchange="toggleSetting('auto_apply_dimming', this.checked)">
+                        Appliquer directement les décisions (dimming)
+                    </label>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="lcuModal" class="modal-overlay hidden">
+    <div class="modal-box">
+        <h3 id="lcuFormMode">Ajouter une Gateway / LCU</h3>
+        <form id="formLcu" method="POST" action="/lcus" style="margin-top:16px;">
+            <input type="hidden" id="lcu_id_field" name="lcu_id" value="">
+            <div class="coords">
+                <div class="field"><label for="lcu_reference">Référence*</label><input id="lcu_reference_field" type="text" name="reference" required></div>
+                <div class="field"><label for="lcu_name">Nom</label><input id="lcu_name_field" type="text" name="name"></div>
+            </div>
+            <div class="coords">
+                <div class="field"><label for="lcu_ip">Adresse IP*</label><input id="lcu_ip_field" type="text" name="ip_address" required placeholder="192.168.1.100"></div>
+                <div class="field"><label for="lcu_port">Port</label><input id="lcu_port_field" type="number" name="port" value="8080"></div>
+            </div>
+            <div class="coords">
+                <div class="field"><label for="lcu_protocol">Protocole</label>
+                    <select id="lcu_protocol_field" name="protocol">
+                        <option value="HTTP">HTTP (Standard)</option>
+                        <option value="MQTT">MQTT</option>
+                        <option value="LoRaWAN">LoRaWAN</option>
+                        <option value="ZigBee">ZigBee</option>
+                    </select>
+                </div>
+                <div class="field"><label for="lcu_token">Token Auth</label><input id="lcu_token_field" type="password" name="auth_token"></div>
+            </div>
+            <div class="field"><label for="lcu_zone">Zone</label><input id="lcu_zone_field" type="text" name="zone"></div>
+            
+            <div style="display:flex;gap:8px;margin-top:20px;">
+                <button type="submit" class="btn btn-primary btn-block">Enregistrer la LCU</button>
+                <button type="button" class="btn btn-secondary" onclick="closeLCUModal()">Annuler</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div id="placementBanner" class="placement-banner hidden">
+    <span>📍 Mode placement actif. Cliquez sur la carte pour positionner l'équipement.</span>
+    <button onclick="cancelPlacementMode()">Annuler</button>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+    window.LAMPADAIRES = {{ .LampadairesJSON }};
+    window.LCUS = {{ .LCUsJSON }};
+</script>
+<script src="/static/js/app.js?v=11"></script>
+</body>
+</html>

@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Télégestion Lampadaires</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+<div class="layout">
+    <aside class="sidebar">
+        <h2>Navigation</h2>
+        <button id="btnMap" class="active" type="button">Carte</button>
+        <button id="btnList" type="button">Tous les lampadaires</button>
+    </aside>
+    <div class="content">
+        <div id="mapView" class="map-layout">
+            <div id="map"></div>
+            <div class="panel">
+                <h1 id="formMode">Ajouter un lampadaire</h1>
+                <p>Cliquer sur la carte pour choisir un emplacement.</p>
+
+        {{ if .Success }}
+            <div class="alert">Lampadaire ajouté avec succès.</div>
+        {{ end }}
+
+        {{ if .Errors }}
+            <div class="errors">
+                {{ range .Errors }}
+                    <div>{{ . }}</div>
+                {{ end }}
+            </div>
+        {{ end }}
+
+        <div id="helper">Aucun emplacement sélectionné.</div>
+
+                <form id="formLampadaire" class="form-hidden" method="POST" action="/lampadaires">
+                    <input type="hidden" id="lampadaire_id" name="lampadaire_id" value="">
+                    <div class="field">
+                        <label for="reference">Référence</label>
+                        <input id="reference" type="text" name="reference" value="{{ .Form.Reference }}" required>
+                    </div>
+
+            <input type="hidden" id="latitude" name="latitude" value="{{ .Form.Latitude }}">
+            <input type="hidden" id="longitude" name="longitude" value="{{ .Form.Longitude }}">
+
+            <div class="coords">
+                <div class="field">
+                    <label for="latitude_display">Latitude</label>
+                    <input id="latitude_display" type="text" value="{{ .Form.Latitude }}" readonly>
+                </div>
+                <div class="field">
+                    <label for="longitude_display">Longitude</label>
+                    <input id="longitude_display" type="text" value="{{ .Form.Longitude }}" readonly>
+                </div>
+            </div>
+
+            <div class="field">
+                <label for="zone">Zone</label>
+                <input id="zone" type="text" name="zone" value="{{ .Form.Zone }}">
+            </div>
+
+            <div class="field">
+                <label for="type_driver">Type driver</label>
+                <select id="type_driver" name="type_driver">
+                    <option value="">Sélectionner</option>
+                    <option value="DALI" {{ if eq .Form.TypeDriver "DALI" }}selected{{ end }}>DALI</option>
+                    <option value="0-10V" {{ if eq .Form.TypeDriver "0-10V" }}selected{{ end }}>0-10V</option>
+                    <option value="PWM" {{ if eq .Form.TypeDriver "PWM" }}selected{{ end }}>PWM</option>
+                </select>
+            </div>
+
+            <div class="field">
+                <label for="protocole">Protocole</label>
+                <input id="protocole" type="text" name="protocole" value="{{ .Form.Protocole }}">
+            </div>
+
+            <div class="field">
+                <label for="puissance">Puissance (W)</label>
+                <input id="puissance" type="number" min="0" name="puissance" value="{{ .Form.Puissance }}">
+            </div>
+
+            <div class="field">
+                <label for="etat">Etat</label>
+                <select id="etat" name="etat">
+                    <option value="offline" {{ if or (eq .Form.Etat "") (eq .Form.Etat "offline") }}selected{{ end }}>Offline</option>
+                    <option value="online" {{ if eq .Form.Etat "online" }}selected{{ end }}>Online</option>
+                    <option value="maintenance" {{ if eq .Form.Etat "maintenance" }}selected{{ end }}>Maintenance</option>
+                </select>
+            </div>
+
+            <div class="field">
+                <label for="intensite">Intensité</label>
+                <input id="intensite" type="range" min="0" max="100" name="intensite" value="{{ if .Form.Intensite }}{{ .Form.Intensite }}{{ else }}0{{ end }}">
+                <small>Valeur: <span id="intensite_value">{{ if .Form.Intensite }}{{ .Form.Intensite }}{{ else }}0{{ end }}</span></small>
+            </div>
+
+            <div class="field">
+                <label for="date_installation">Date d'installation</label>
+                <input id="date_installation" type="date" name="date_installation" value="{{ .Form.DateInstallation }}">
+            </div>
+
+                    <button id="submitButton" type="submit">Ajouter lampadaire</button>
+                    <button id="cancelEdit" type="button" class="form-hidden">Annuler</button>
+                </form>
+            </div>
+        </div>
+        <div id="listView" class="panel view-hidden">
+            <h1>Liste des lampadaires</h1>
+            <p>Etat et intensité en temps réel.</p>
+            {{ if .Lampadaires }}
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Référence</th>
+                            <th>Etat</th>
+                            <th>Intensité</th>
+                            <th>Zone</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{ range .Lampadaires }}
+                        <tr>
+                            <td>{{ .Reference }}</td>
+                            <td><span class="status {{ .Etat }}">{{ .Etat }}</span></td>
+                            <td>{{ .Intensite }}%</td>
+                            <td>{{ .Zone }}</td>
+                        </tr>
+                        {{ end }}
+                    </tbody>
+                </table>
+            {{ else }}
+                <div>Aucun lampadaire enregistré.</div>
+            {{ end }}
+        </div>
+    </div>
+</div>
+
+<script>
+    window.LAMPADAIRES = {{ .LampadairesJSON }};
+</script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script src="/static/js/app.js"></script>
+</body>
+</html>
