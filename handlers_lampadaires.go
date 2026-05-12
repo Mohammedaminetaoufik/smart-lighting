@@ -320,8 +320,9 @@ func handleGetMissingLocationLampadaires(db *sql.DB) gin.HandlerFunc {
 		}
 		missing := []Lampadaire{}
 		for _, l := range lampadaires {
-			// we assume location is missing if nil or 0,0
-			if l.Latitude == nil || l.Longitude == nil || (*l.Latitude == 0 && *l.Longitude == 0) {
+			noCoords := l.Latitude == nil || l.Longitude == nil || (*l.Latitude == 0 && *l.Longitude == 0)
+			estimated := l.LocationStatus == "estimated"
+			if noCoords || estimated {
 				missing = append(missing, l)
 			}
 		}

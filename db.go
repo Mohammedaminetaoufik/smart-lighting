@@ -348,9 +348,16 @@ func ensureSchema(db *sql.DB) error {
 			updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 		);
 
+		-- calculator_decisions columns added after initial schema
+		ALTER TABLE calculator_decisions ADD COLUMN IF NOT EXISTS rule_name TEXT;
+		ALTER TABLE calculator_decisions ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pending';
+		ALTER TABLE calculator_decisions ADD COLUMN IF NOT EXISTS validated_by INTEGER REFERENCES users(id);
+		ALTER TABLE calculator_decisions ADD COLUMN IF NOT EXISTS validated_at TIMESTAMP NULL;
+		ALTER TABLE calculator_decisions ADD COLUMN IF NOT EXISTS rejected_reason TEXT NULL;
+
 		-- Professionnal Constraints
-		DO $$ 
-		BEGIN 
+		DO $$
+		BEGIN
 			-- Lampadaires constraints
 			IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'check_lampadaire_etat') THEN
 				ALTER TABLE lampadaires ADD CONSTRAINT check_lampadaire_etat CHECK (etat IN ('online', 'offline', 'maintenance'));
@@ -374,9 +381,9 @@ func ensureSchema(db *sql.DB) error {
 			IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'check_alert_severity') THEN
 				ALTER TABLE alerts ADD CONSTRAINT check_alert_severity CHECK (severity IN ('info', 'warning', 'critical'));
 			END IF;
-			IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'check_alert_status') THEN
-				ALTER TABLE alerts ADD CONSTRAINT check_alert_status CHECK (status IN ('open', 'resolved'));
-			END IF;
+			-- Drop and recreate check_alert_status to include 'in_progress'
+			ALTER TABLE alerts DROP CONSTRAINT IF EXISTS check_alert_status;
+			ALTER TABLE alerts ADD CONSTRAINT check_alert_status CHECK (status IN ('open', 'resolved', 'in_progress'));
 
 			-- Dimming commands constraints
 			IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'check_dimming_status') THEN

@@ -6,6 +6,8 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -43,28 +45,108 @@ var (
 	mu      sync.RWMutex
 )
 
+type zoneConfig struct {
+	name string
+	lat  float64
+	lng  float64
+}
+
+var zones = []zoneConfig{
+	{"Zone A (Medina)", 31.6295, -7.9811},
+	{"Zone B (Gueliz)", 31.6340, -8.0100},
+	{"Zone C (Hivernage)", 31.6205, -8.0050},
+	{"Zone D (Palmeraie)", 31.6600, -7.9500},
+}
+
+var drivers = []string{"DALI", "0-10V", "PWM"}
+var powers = []int{50, 70, 80, 90, 100, 120, 150}
+
 func init() {
-	lat1, lng1 := 31.6251, -7.9892
-	lat2, lng2 := 31.6255, -7.9887
-	lat3, lng3 := 31.6260, -7.9880
-
-	initialDevices := []*Device{
-		{DeviceUID: "LCU-TEST-001-LAMP-001", Reference: "LP-001", NodeAddress: "0x01", Latitude: &lat1, Longitude: &lng1, Zone: "Zone A", TypeDriver: "DALI", Protocole: "ZigBee", Puissance: 100, Etat: "online", Intensite: 70},
-		{DeviceUID: "LCU-TEST-001-LAMP-002", Reference: "LP-002", NodeAddress: "0x02", Latitude: &lat2, Longitude: &lng2, Zone: "Zone A", TypeDriver: "DALI", Protocole: "ZigBee", Puissance: 120, Etat: "online", Intensite: 60},
-		{DeviceUID: "LCU-TEST-001-LAMP-003", Reference: "LP-003", NodeAddress: "0x03", Latitude: &lat3, Longitude: &lng3, Zone: "Zone A", TypeDriver: "0-10V", Protocole: "ZigBee", Puissance: 80, Etat: "maintenance", Intensite: 0},
-		{DeviceUID: "LCU-TEST-001-LAMP-004", Reference: "LP-004", NodeAddress: "0x04", Zone: "Zone A", TypeDriver: "DALI", Protocole: "ZigBee", Puissance: 90, Etat: "offline", Intensite: 0},
-		{DeviceUID: "LCU-TEST-001-LAMP-005", Reference: "LP-005", NodeAddress: "0x05", Zone: "Zone A", TypeDriver: "PWM", Protocole: "ZigBee", Puissance: 75, Etat: "online", Intensite: 50},
+	count := 30
+	if v := os.Getenv("LAMP_COUNT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			count = n
+		}
 	}
 
-	for _, d := range initialDevices {
-		devices[d.DeviceUID] = d
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+
+	// How many devices per zone get no GPS (to test "missing location" flow)
+	// We mark the last 3 devices of each zone as no-coords
+	noCoordPerZone := 3
+
+	// Track how many devices we've assigned per zone
+	zoneCount := make([]int, len(zones))
+
+	for i := 0; i < count; i++ {
+		z := zones[i%len(zones)]
+		zoneIdx := i % len(zones)
+		zoneCount[zoneIdx]++
+
+		driver := drivers[i%len(drivers)]
+		power := powers[i%len(powers)]
+
+		// Determine state: ~70% online, ~15% maintenance, ~15% offline
+		var etat string
+		r := rng.Intn(100)
+		switch {
+		case r < 70:
+			etat = "online"
+		case r < 85:
+			etat = "maintenance"
+		default:
+			etat = "offline"
+		}
+
+		intensite := 0
+		if etat == "online" {
+			intensite = 50 + rng.Intn(41) // 50–90
+		}
+
+		// GPS: assign coords unless this device is one of the last noCoordPerZone in its zone
+		// We determine "last N in zone" by checking the total devices this zone will have
+		devicesInZone := count / len(zones)
+		if zoneIdx < count%len(zones) {
+			devicesInZone++
+		}
+		hasCoords := zoneCount[zoneIdx] <= devicesInZone-noCoordPerZone
+		if devicesInZone <= noCoordPerZone {
+			hasCoords = true // avoid all being nil when zone is tiny
+		}
+
+		var lat, lng *float64
+		if hasCoords {
+			latVal := z.lat + (rng.Float64()-0.5)*0.001
+			lngVal := z.lng + (rng.Float64()-0.5)*0.001
+			lat = &latVal
+			lng = &lngVal
+		}
+
+		uid := fmt.Sprintf("LCU-TEST-001-LAMP-%03d", i+1)
+		d := &Device{
+			DeviceUID:   uid,
+			Reference:   fmt.Sprintf("LP-%03d", i+1),
+			NodeAddress: fmt.Sprintf("0x%02X", i+1),
+			Latitude:    lat,
+			Longitude:   lng,
+			Zone:        z.name,
+			TypeDriver:  driver,
+			Protocole:   "ZigBee",
+			Puissance:   power,
+			Etat:        etat,
+			Intensite:   intensite,
+		}
+		devices[uid] = d
 	}
+
+	log.Printf("LCU virtuelle: %d lampadaires générés dans %d zones", count, len(zones))
 }
 
 func main() {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/api/health", handleHealth)
+	mux.HandleFunc("/api/devices/count", handleDeviceCount)
 	mux.HandleFunc("/api/devices", handleDevices)
 	mux.HandleFunc("/api/devices/", handleDeviceAction)
 
@@ -74,6 +156,7 @@ func main() {
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	resp := map[string]string{
 		"status":    "online",
 		"reference": "LCU-TEST-001",
@@ -84,6 +167,14 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
+func handleDeviceCount(w http.ResponseWriter, r *http.Request) {
+	mu.RLock()
+	n := len(devices)
+	mu.RUnlock()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]int{"count": n})
+}
+
 func handleDevices(w http.ResponseWriter, r *http.Request) {
 	mu.RLock()
 	defer mu.RUnlock()
@@ -92,17 +183,25 @@ func handleDevices(w http.ResponseWriter, r *http.Request) {
 	for _, d := range devices {
 		list = append(list, d)
 	}
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(list)
 }
 
 func handleDeviceAction(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(r.URL.Path, "/")
+	// /api/devices/{uid}/{action}
 	if len(parts) < 4 {
 		http.Error(w, "Bad request", http.StatusBadRequest)
 		return
 	}
 
 	uid := parts[3]
+	// "count" is handled by its own route; guard here in case mux routes it here
+	if uid == "count" {
+		handleDeviceCount(w, r)
+		return
+	}
+
 	action := ""
 	if len(parts) >= 5 {
 		action = parts[4]
@@ -135,16 +234,19 @@ func handleDeviceAction(w http.ResponseWriter, r *http.Request) {
 
 		mu.Lock()
 		device.Intensite = req.Intensity
+		if req.Intensity > 0 {
+			device.Etat = "online"
+		}
 		mu.Unlock()
 
-		resp := map[string]interface{}{
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
 			"status":     "applied",
 			"device_uid": uid,
 			"intensity":  req.Intensity,
 			"source":     req.Source,
 			"reason":     req.Reason,
-		}
-		json.NewEncoder(w).Encode(resp)
+		})
 
 	case "telemetry":
 		if r.Method != http.MethodGet {
@@ -153,34 +255,39 @@ func handleDeviceAction(w http.ResponseWriter, r *http.Request) {
 		}
 
 		anomaly := r.URL.Query().Get("anomaly") == "true"
+		rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+
+		mu.RLock()
+		puissance := device.Puissance
+		intensite := device.Intensite
+		mu.RUnlock()
 
 		t := Telemetry{
 			DeviceUID:   uid,
-			Luminosite:  20 + rand.Float64()*10,
-			Presence:    rand.Intn(2) == 1,
-			Temperature: 25 + rand.Float64()*10,
-			Humidite:    40 + rand.Float64()*20,
-			Tension:     220 + rand.Float64()*5,
-			Courant:     0.4 + rand.Float64()*0.1,
-			Puissance:   float64(device.Puissance) * (float64(device.Intensite) / 100.0),
-			Energie:     2.0 + rand.Float64(),
+			Luminosite:  20 + rng.Float64()*10,
+			Presence:    rng.Intn(2) == 1,
+			Temperature: 25 + rng.Float64()*10,
+			Humidite:    40 + rng.Float64()*20,
+			Tension:     220 + rng.Float64()*5,
+			Courant:     0.4 + rng.Float64()*0.1,
+			Puissance:   float64(puissance) * (float64(intensite) / 100.0),
+			Energie:     2.0 + rng.Float64(),
 			Source:      "mock_lcu",
 		}
 
 		if anomaly {
-			// Trigger one of the anomalies
-			choice := rand.Intn(3)
-			switch choice {
+			switch rng.Intn(3) {
 			case 0:
-				t.Temperature = 85 + rand.Float64()*10
+				t.Temperature = 85 + rng.Float64()*10
 			case 1:
-				t.Humidite = 95 + rand.Float64()*5
+				t.Humidite = 95 + rng.Float64()*5
 			case 2:
-				t.Puissance = float64(device.Puissance) * 1.6
+				t.Puissance = float64(puissance) * 1.6
 			}
 			t.Source = "mock_lcu_anomaly"
 		}
 
+		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(t)
 
 	default:

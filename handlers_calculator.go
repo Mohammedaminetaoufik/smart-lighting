@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
@@ -120,7 +121,8 @@ func handleRunCalculator(db *sql.DB, adapter LCUAdapter) gin.HandlerFunc {
 		c.BindJSON(&body)
 		decision, err := runIntelligentCalculator(c.Request.Context(), db, adapter, id, body.Apply)
 		if err != nil {
-			respondError(c, http.StatusInternalServerError, "Erreur calculateur.")
+			log.Printf("calculator error lamp=%d: %v", id, err)
+			respondError(c, http.StatusInternalServerError, "Erreur calculateur: "+err.Error())
 			return
 		}
 		respondJSON(c, http.StatusOK, decision)
