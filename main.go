@@ -63,6 +63,7 @@ func main() {
 
 		// LCU API
 		api.GET("/lcus", handleListLCUsJSON(db))
+		api.POST("/lcus", handleCreateLCUJSON(db))
 		api.GET("/lcus/:id", handleGetLCUJSON(db))
 		api.POST("/lcus/:id/test", handleTestLCU(db, lcuAdapter))
 		api.POST("/lcus/:id/sync", handleSyncLCU(db, lcuAdapter))
@@ -70,8 +71,28 @@ func main() {
 
 		// Lampadaires API
 		api.GET("/lampadaires/:id", handleGetLampadaireJSON(db))
-		api.GET("/lampadaires/missing-location", handleListMissingLocation(db))
-		api.POST("/lampadaires/:id/location", handleUpdateLampadaireLocationAPI(db))
+		api.GET("/lampadaires/missing-location", handleGetMissingLocationLampadaires(db))
+		api.POST("/lampadaires/:id/location", handleUpdateLampadaireLocation(db))
+		api.POST("/lampadaires/:id/commissioning", handleUpdateCommissioningStatus(db))
+
+		// Lighting Profiles API
+		api.GET("/lighting-profiles", handleGetLightingProfiles(db))
+		api.POST("/lighting-profiles", handleCreateLightingProfile(db))
+		api.POST("/lighting-profiles/:id/apply", handleApplyLightingProfile(db, lcuAdapter))
+		api.POST("/lighting-profiles/:id/enable", handleEnableLightingProfile(db))
+		api.POST("/lighting-profiles/:id/disable", handleDisableLightingProfile(db))
+
+		// Lighting Groups API
+		api.GET("/lighting-groups", handleGetLightingGroups(db))
+		api.POST("/lighting-groups", handleCreateLightingGroup(db))
+
+		// Interventions API
+		api.GET("/interventions", handleGetInterventions(db))
+		api.POST("/interventions", handleCreateIntervention(db))
+		api.POST("/alerts/:id/intervention", handleCreateInterventionFromAlert(db))
+		api.POST("/interventions/:id/start", handleUpdateInterventionStatus(db, "in_progress"))
+		api.POST("/interventions/:id/resolve", handleUpdateInterventionStatus(db, "resolved"))
+		api.POST("/interventions/:id/close", handleCloseIntervention(db))
 
 		// Telemetry API
 		api.POST("/telemetry", handlePostTelemetry(db))

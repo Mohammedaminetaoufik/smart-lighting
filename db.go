@@ -205,6 +205,62 @@ func ensureSchema(db *sql.DB) error {
 		ALTER TABLE lampadaires ADD COLUMN IF NOT EXISTS node_address TEXT;
 		ALTER TABLE lampadaires ADD COLUMN IF NOT EXISTS discovered_by_lcu BOOLEAN NOT NULL DEFAULT false;
 		ALTER TABLE lampadaires ADD COLUMN IF NOT EXISTS location_status TEXT NOT NULL DEFAULT 'manual';
+		ALTER TABLE lampadaires ADD COLUMN IF NOT EXISTS commissioning_status TEXT NOT NULL DEFAULT 'discovered';
+
+		DO $$ 
+		BEGIN 
+			IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_commissioning_status') THEN
+				ALTER TABLE lampadaires ADD CONSTRAINT chk_commissioning_status CHECK (commissioning_status IN ('discovered', 'located', 'configured', 'tested', 'commissioned'));
+			END IF;
+		END $$;
+
+		CREATE TABLE IF NOT EXISTS lighting_groups (
+			id SERIAL PRIMARY KEY,
+			name TEXT NOT NULL,
+			zone TEXT,
+			description TEXT,
+			created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+		);
+
+		CREATE TABLE IF NOT EXISTS lighting_profiles (
+			id SERIAL PRIMARY KEY,
+			name TEXT NOT NULL,
+			description TEXT,
+			target_type TEXT NOT NULL DEFAULT 'zone',
+			target_value TEXT NOT NULL,
+			enabled BOOLEAN NOT NULL DEFAULT true,
+			created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+			CONSTRAINT chk_target_type CHECK (target_type IN ('zone', 'group', 'lcu'))
+		);
+
+		CREATE TABLE IF NOT EXISTS lighting_profile_schedules (
+			id SERIAL PRIMARY KEY,
+			profile_id INTEGER NOT NULL REFERENCES lighting_profiles(id) ON DELETE CASCADE,
+			start_time TEXT NOT NULL,
+			end_time TEXT NOT NULL,
+			intensity INTEGER NOT NULL,
+			days_of_week TEXT,
+			created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+			CONSTRAINT chk_intensity CHECK (intensity BETWEEN 0 AND 100)
+		);
+
+		CREATE TABLE IF NOT EXISTS interventions (
+			id SERIAL PRIMARY KEY,
+			alert_id INTEGER REFERENCES alerts(id) ON DELETE SET NULL,
+			lampadaire_id INTEGER REFERENCES lampadaires(id) ON DELETE CASCADE,
+			assigned_to INTEGER REFERENCES users(id) ON DELETE SET NULL,
+			title TEXT NOT NULL,
+			description TEXT,
+			priority TEXT NOT NULL DEFAULT 'medium',
+			status TEXT NOT NULL DEFAULT 'open',
+			created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+			closed_at TIMESTAMP NULL,
+			CONSTRAINT chk_priority CHECK (priority IN ('low', 'medium', 'high', 'critical')),
+			CONSTRAINT chk_status CHECK (status IN ('open', 'in_progress', 'resolved', 'closed'))
+		);
 
 		CREATE UNIQUE INDEX IF NOT EXISTS idx_lampadaire_lcu_device
 		ON lampadaires(lcu_id, device_uid)
@@ -292,20 +348,6 @@ func ensureSchema(db *sql.DB) error {
 			updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 		);
 
-		CREATE TABLE IF NOT EXISTS interventions (
-			id SERIAL PRIMARY KEY,
-			alert_id INTEGER REFERENCES alerts(id) ON DELETE SET NULL,
-			lampadaire_id INTEGER REFERENCES lampadaires(id) ON DELETE CASCADE,
-			assigned_to INTEGER REFERENCES users(id) ON DELETE SET NULL,
-			title TEXT NOT NULL,
-			description TEXT,
-			priority TEXT NOT NULL DEFAULT 'medium',
-			status TEXT NOT NULL DEFAULT 'open',
-			created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-			updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-			closed_at TIMESTAMP NULL
-		);
-
 		-- Professionnal Constraints
 		DO $$ 
 		BEGIN 
@@ -354,7 +396,7 @@ func getLampadaireByID(ctx context.Context, db *sql.DB, id int) (*Lampadaire, er
 		SELECT id, reference, latitude, longitude, zone, type_driver, protocole,
 			puissance, etat, intensite, date_installation,
 			last_seen_at, last_command_at, address, quartier, lcu_reference, driver_reference, notes,
-			lcu_id, device_uid, node_address, discovered_by_lcu, location_status
+			lcu_id, device_uid, node_address, discovered_by_lcu, location_status, commissioning_status
 		FROM lampadaires
 		WHERE id = $1 AND archived_at IS NULL
 	`, id)
@@ -372,7 +414,7 @@ func getLampadaireByID(ctx context.Context, db *sql.DB, id int) (*Lampadaire, er
 		&item.Etat, &item.Intensite, &dateInstallation,
 		&lastSeenAt, &lastCommandAt, &address, &quartier,
 		&lcuReference, &driverReference, &notes,
-		&lcuID, &deviceUID, &nodeAddress, &item.DiscoveredByLCU, &item.LocationStatus,
+		&lcuID, &deviceUID, &nodeAddress, &item.DiscoveredByLCU, &item.LocationStatus, &item.CommissioningStatus,
 	)
 	if err != nil {
 		return nil, err
@@ -474,7 +516,7 @@ func listLampadaires(ctx context.Context, db *sql.DB, search map[string]string) 
 		SELECT l.id, l.reference, l.latitude, l.longitude, l.zone, l.type_driver, l.protocole,
 			l.puissance, l.etat, l.intensite, l.date_installation,
 			l.last_seen_at, l.last_command_at, l.address, l.quartier, l.lcu_reference, l.driver_reference, l.notes,
-			l.lcu_id, l.device_uid, l.node_address, l.discovered_by_lcu, l.location_status,
+			l.lcu_id, l.device_uid, l.node_address, l.discovered_by_lcu, l.location_status, l.commissioning_status,
 			EXISTS(SELECT 1 FROM alerts a WHERE a.lampadaire_id = l.id AND a.status = 'open' AND a.severity = 'critical') as has_alert
 		FROM lampadaires l
 		WHERE ` + strings.Join(where, " AND ") + `
@@ -502,7 +544,7 @@ func listLampadaires(ctx context.Context, db *sql.DB, search map[string]string) 
 			&item.Etat, &item.Intensite, &dateInstallation,
 			&lastSeenAt, &lastCommandAt, &address, &quartier,
 			&lcuReference, &driverReference, &notes,
-			&lcuID, &deviceUID, &nodeAddress, &item.DiscoveredByLCU, &item.LocationStatus,
+			&lcuID, &deviceUID, &nodeAddress, &item.DiscoveredByLCU, &item.LocationStatus, &item.CommissioningStatus,
 			&item.HasCriticalAlert,
 		); err != nil {
 			return nil, err
@@ -581,15 +623,15 @@ func insertLampadaire(ctx context.Context, db *sql.DB, l Lampadaire) error {
 		INSERT INTO lampadaires (
 			reference, latitude, longitude, zone, type_driver, protocole, puissance,
 			etat, intensite, date_installation, address, quartier, lcu_reference,
-			driver_reference, notes, lcu_id, device_uid, node_address, discovered_by_lcu, location_status
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+			driver_reference, notes, lcu_id, device_uid, node_address, discovered_by_lcu, location_status, commissioning_status
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
 	`,
 		l.Reference, l.Latitude, l.Longitude,
 		nullString(l.Zone), nullString(l.TypeDriver), nullString(l.Protocole),
 		l.Puissance, l.Etat, l.Intensite, l.DateInstallation,
 		nullString(l.Address), nullString(l.Quartier), nullString(l.LCUReference),
 		nullString(l.DriverReference), nullString(l.Notes),
-		l.LCUID, nullString(l.DeviceUID), nullString(l.NodeAddress), l.DiscoveredByLCU, l.LocationStatus,
+		l.LCUID, nullString(l.DeviceUID), nullString(l.NodeAddress), l.DiscoveredByLCU, l.LocationStatus, l.CommissioningStatus,
 	)
 	return err
 }
@@ -599,15 +641,15 @@ func insertLampadaireTx(ctx context.Context, tx *sql.Tx, l Lampadaire) error {
 		INSERT INTO lampadaires (
 			reference, latitude, longitude, zone, type_driver, protocole, puissance,
 			etat, intensite, date_installation, address, quartier, lcu_reference,
-			driver_reference, notes, lcu_id, device_uid, node_address, discovered_by_lcu, location_status
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+			driver_reference, notes, lcu_id, device_uid, node_address, discovered_by_lcu, location_status, commissioning_status
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
 	`,
 		l.Reference, l.Latitude, l.Longitude,
 		nullString(l.Zone), nullString(l.TypeDriver), nullString(l.Protocole),
 		l.Puissance, l.Etat, l.Intensite, l.DateInstallation,
 		nullString(l.Address), nullString(l.Quartier), nullString(l.LCUReference),
 		nullString(l.DriverReference), nullString(l.Notes),
-		l.LCUID, nullString(l.DeviceUID), nullString(l.NodeAddress), l.DiscoveredByLCU, l.LocationStatus,
+		l.LCUID, nullString(l.DeviceUID), nullString(l.NodeAddress), l.DiscoveredByLCU, l.LocationStatus, l.CommissioningStatus,
 	)
 	return err
 }
@@ -635,15 +677,16 @@ func updateLampadaire(ctx context.Context, db *sql.DB, l Lampadaire) error {
 			node_address = $18,
 			discovered_by_lcu = $19,
 			location_status = $20,
+			commissioning_status = $21,
 			updated_at = NOW()
-		WHERE id = $21
+		WHERE id = $22
 	`,
 		l.Reference, l.Latitude, l.Longitude,
 		nullString(l.Zone), nullString(l.TypeDriver), nullString(l.Protocole),
 		l.Puissance, l.Etat, l.Intensite, l.DateInstallation,
 		nullString(l.Address), nullString(l.Quartier), nullString(l.LCUReference),
 		nullString(l.DriverReference), nullString(l.Notes),
-		l.LCUID, nullString(l.DeviceUID), nullString(l.NodeAddress), l.DiscoveredByLCU, l.LocationStatus,
+		l.LCUID, nullString(l.DeviceUID), nullString(l.NodeAddress), l.DiscoveredByLCU, l.LocationStatus, l.CommissioningStatus,
 		l.ID,
 	)
 	return err
@@ -672,15 +715,16 @@ func updateLampadaireTx(ctx context.Context, tx *sql.Tx, l Lampadaire) error {
 			node_address = $18,
 			discovered_by_lcu = $19,
 			location_status = $20,
+			commissioning_status = $21,
 			updated_at = NOW()
-		WHERE id = $21
+		WHERE id = $22
 	`,
 		l.Reference, l.Latitude, l.Longitude,
 		nullString(l.Zone), nullString(l.TypeDriver), nullString(l.Protocole),
 		l.Puissance, l.Etat, l.Intensite, l.DateInstallation,
 		nullString(l.Address), nullString(l.Quartier), nullString(l.LCUReference),
 		nullString(l.DriverReference), nullString(l.Notes),
-		l.LCUID, nullString(l.DeviceUID), nullString(l.NodeAddress), l.DiscoveredByLCU, l.LocationStatus,
+		l.LCUID, nullString(l.DeviceUID), nullString(l.NodeAddress), l.DiscoveredByLCU, l.LocationStatus, l.CommissioningStatus,
 		l.ID,
 	)
 	return err
@@ -699,6 +743,62 @@ func insertLCU(ctx context.Context, db *sql.DB, lcu LCU) error {
 		lcu.Latitude, lcu.Longitude, lcu.Status,
 	)
 	return err
+}
+
+func upsertLCUByReference(ctx context.Context, db *sql.DB, lcu LCU) (LCU, error) {
+	var result LCU
+	var name, authToken, zone, address sql.NullString
+	var lat, lng sql.NullFloat64
+	var lastSeen, lastSync sql.NullTime
+	err := db.QueryRowContext(ctx, `
+		INSERT INTO lcus (reference, name, ip_address, port, protocol, auth_token, zone, address, latitude, longitude, status)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		ON CONFLICT (reference) DO UPDATE SET
+			name = EXCLUDED.name,
+			ip_address = EXCLUDED.ip_address,
+			port = EXCLUDED.port,
+			protocol = EXCLUDED.protocol,
+			zone = EXCLUDED.zone,
+			address = EXCLUDED.address,
+			updated_at = NOW()
+		RETURNING id, reference, name, ip_address, port, protocol, auth_token, zone, address, latitude, longitude, status, last_seen_at, last_sync_at, created_at, updated_at
+	`,
+		lcu.Reference, nullString(lcu.Name), lcu.IPAddress, lcu.Port, lcu.Protocol,
+		nullString(lcu.AuthToken), nullString(lcu.Zone), nullString(lcu.Address),
+		lcu.Latitude, lcu.Longitude, lcu.Status,
+	).Scan(
+		&result.ID, &result.Reference, &name, &result.IPAddress, &result.Port, &result.Protocol,
+		&authToken, &zone, &address, &lat, &lng, &result.Status, &lastSeen, &lastSync,
+		&result.CreatedAt, &result.UpdatedAt,
+	)
+	if err != nil {
+		return result, err
+	}
+	if name.Valid {
+		result.Name = name.String
+	}
+	if authToken.Valid {
+		result.AuthToken = authToken.String
+	}
+	if zone.Valid {
+		result.Zone = zone.String
+	}
+	if address.Valid {
+		result.Address = address.String
+	}
+	if lat.Valid {
+		result.Latitude = &lat.Float64
+	}
+	if lng.Valid {
+		result.Longitude = &lng.Float64
+	}
+	if lastSeen.Valid {
+		result.LastSeenAt = &lastSeen.Time
+	}
+	if lastSync.Valid {
+		result.LastSyncAt = &lastSync.Time
+	}
+	return result, nil
 }
 
 func updateLCU(ctx context.Context, db *sql.DB, lcu LCU) error {
@@ -1053,7 +1153,11 @@ func listLampadairesMissingLocation(ctx context.Context, db *sql.DB) ([]Lampadai
 
 func updateLampadaireLocation(ctx context.Context, db *sql.DB, id int, lat, lng float64, status string) error {
 	_, err := db.ExecContext(ctx, `
-		UPDATE lampadaires SET latitude = $1, longitude = $2, location_status = $3, updated_at = NOW() WHERE id = $4
+		UPDATE lampadaires 
+		SET latitude = $1, longitude = $2, location_status = $3, 
+			commissioning_status = CASE WHEN commissioning_status = 'discovered' THEN 'located' ELSE commissioning_status END,
+			updated_at = NOW() 
+		WHERE id = $4
 	`, lat, lng, status, id)
 	return err
 }

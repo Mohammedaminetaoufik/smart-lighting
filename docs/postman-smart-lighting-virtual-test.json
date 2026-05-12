@@ -1,0 +1,296 @@
+{
+	"info": {
+		"_postman_id": "8b2979d4-93bf-48fb-9120-7bb9726377b6",
+		"name": "Smart Lighting Virtual Test",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "LCU Virtuelle",
+			"item": [
+				{
+					"name": "Health LCU virtuelle",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{mock_lcu_url}}/api/health",
+							"host": [
+								"{{mock_lcu_url}}"
+							],
+							"path": [
+								"api",
+								"health"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Devices LCU virtuelle",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{mock_lcu_url}}/api/devices",
+							"host": [
+								"{{mock_lcu_url}}"
+							],
+							"path": [
+								"api",
+								"devices"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Plateforme - LCU",
+			"item": [
+				{
+					"name": "List LCUs",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/lcus",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"lcus"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Test LCU",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/lcus/{{lcu_id}}/test",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"lcus",
+								"{{lcu_id}}",
+								"test"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Sync LCU",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/lcus/{{lcu_id}}/sync",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"lcus",
+								"{{lcu_id}}",
+								"sync"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Plateforme - Lampadaires",
+			"item": [
+				{
+					"name": "Get missing location",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/lampadaires/missing-location",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"lampadaires",
+								"missing-location"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update location",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"latitude\": 31.6265,\n    \"longitude\": -7.9875\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/api/lampadaires/{{lampadaire_id}}/location",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"lampadaires",
+								"{{lampadaire_id}}",
+								"location"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Plateforme - Telemetrie & Dimming",
+			"item": [
+				{
+					"name": "Post Telemetry",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"lcu_reference\": \"LCU-TEST-001\",\n    \"device_uid\": \"LCU-TEST-001-LAMP-001\",\n    \"luminosite\": 20,\n    \"presence\": true,\n    \"temperature\": 35,\n    \"humidite\": 60,\n    \"tension\": 220,\n    \"courant\": 0.42,\n    \"puissance\": 92,\n    \"energie\": 1.8,\n    \"source\": \"mock_lcu\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/api/telemetry",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"telemetry"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Dimming",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"new_intensity\": 45,\n    \"source\": \"admin\",\n    \"reason\": \"Test dimming virtuel\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/api/lampadaires/{{lampadaire_id}}/dimming",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"lampadaires",
+								"{{lampadaire_id}}",
+								"dimming"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Plateforme - Stats & Dashboard",
+			"item": [
+				{
+					"name": "Dashboard Stats",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/dashboard/stats",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"dashboard",
+								"stats"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Energy Summary",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/energy/summary",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"energy",
+								"summary"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8080"
+		},
+		{
+			"key": "mock_lcu_url",
+			"value": "http://localhost:9091"
+		},
+		{
+			"key": "lcu_id",
+			"value": "1"
+		},
+		{
+			"key": "lampadaire_id",
+			"value": "1"
+		},
+		{
+			"key": "alert_id",
+			"value": "1"
+		},
+		{
+			"key": "intervention_id",
+			"value": "1"
+		}
+	]
+}

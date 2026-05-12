@@ -138,37 +138,6 @@ func handleListMissingLocation(db *sql.DB) gin.HandlerFunc {
 	}
 }
 
-func handleUpdateLampadaireLocationAPI(db *sql.DB) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		id, err := parseIDParam(c, "id")
-		if err != nil {
-			respondError(c, http.StatusBadRequest, "Identifiant invalide.")
-			return
-		}
-
-		var body struct {
-			Latitude  float64 `json:"latitude"`
-			Longitude float64 `json:"longitude"`
-			Status    string  `json:"status"`
-		}
-		if err := c.BindJSON(&body); err != nil {
-			respondError(c, http.StatusBadRequest, "Payload JSON invalide.")
-			return
-		}
-
-		if body.Status == "" {
-			body.Status = "confirmed"
-		}
-
-		err = updateLampadaireLocation(c.Request.Context(), db, id, body.Latitude, body.Longitude, body.Status)
-		if err != nil {
-			respondError(c, http.StatusInternalServerError, "Erreur mise e jour.")
-			return
-		}
-
-		respondJSON(c, http.StatusOK, gin.H{"status": "success"})
-	}
-}
 func renderIndex(c *gin.Context, db *sql.DB, data PageData) {
 	search := map[string]string{
 		"etat":   c.Query("etat"),
@@ -236,7 +205,8 @@ func readForm(c *gin.Context) FormData {
 		LCUID:          strings.TrimSpace(c.PostForm("lcu_id")),
 		DeviceUID:      strings.TrimSpace(c.PostForm("device_uid")),
 		NodeAddress:    strings.TrimSpace(c.PostForm("node_address")),
-		LocationStatus: strings.TrimSpace(c.PostForm("location_status")),
+		LocationStatus:   strings.TrimSpace(c.PostForm("location_status")),
+		CommissioningStatus: strings.TrimSpace(c.PostForm("commissioning_status")),
 	}
 }
 
@@ -304,6 +274,11 @@ func buildLampadaire(form FormData) (Lampadaire, []string) {
 		status = "manual"
 	}
 
+	commStatus := form.CommissioningStatus
+	if commStatus == "" {
+		commStatus = "discovered"
+	}
+
 	var lcuIDPtr *int
 	if form.LCUID != "" {
 		lid, err := strconv.Atoi(form.LCUID)
@@ -332,6 +307,7 @@ func buildLampadaire(form FormData) (Lampadaire, []string) {
 		DeviceUID:        form.DeviceUID,
 		NodeAddress:      form.NodeAddress,
 		LocationStatus:   status,
+		CommissioningStatus: commStatus,
 	}, nil
 }
 
@@ -368,9 +344,49 @@ func handleUpdateLampadaireLocation(db *sql.DB) gin.HandlerFunc {
 			respondError(c, http.StatusBadRequest, "Invalid JSON")
 			return
 		}
-		_, err = db.ExecContext(c.Request.Context(), "UPDATE lampadaires SET latitude=$1, longitude=$2, location_status='confirmed' WHERE id=$3", payload.Latitude, payload.Longitude, id)
+		if payload.Latitude < -90 || payload.Latitude > 90 {
+			respondError(c, http.StatusBadRequest, "Latitude invalide (doit être entre -90 et 90)")
+			return
+		}
+		if payload.Longitude < -180 || payload.Longitude > 180 {
+			respondError(c, http.StatusBadRequest, "Longitude invalide (doit être entre -180 et 180)")
+			return
+		}
+		// When location is updated, status becomes 'located' automatically if it was 'discovered'
+		_, err = db.ExecContext(c.Request.Context(), `
+			UPDATE lampadaires 
+			SET latitude=$1, longitude=$2, location_status='confirmed',
+			commissioning_status = CASE WHEN commissioning_status = 'discovered' THEN 'located' ELSE commissioning_status END
+			WHERE id=$3`, payload.Latitude, payload.Longitude, id)
 		if err != nil {
 			respondError(c, http.StatusInternalServerError, "Database error")
+			return
+		}
+		respondJSON(c, http.StatusOK, map[string]string{"status": "success"})
+	}
+}
+
+func handleUpdateCommissioningStatus(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, err := parseIDParam(c, "id")
+		if err != nil {
+			respondError(c, http.StatusBadRequest, "ID invalide")
+			return
+		}
+		var payload struct {
+			Status string `json:"commissioning_status"`
+		}
+		if err := c.BindJSON(&payload); err != nil {
+			respondError(c, http.StatusBadRequest, "Invalid JSON")
+			return
+		}
+		if payload.Status == "" {
+			respondError(c, http.StatusBadRequest, "Le statut ne peut pas être vide")
+			return
+		}
+		_, err = db.ExecContext(c.Request.Context(), "UPDATE lampadaires SET commissioning_status=$1 WHERE id=$2", payload.Status, id)
+		if err != nil {
+			respondError(c, http.StatusInternalServerError, "Database error: "+err.Error())
 			return
 		}
 		respondJSON(c, http.StatusOK, map[string]string{"status": "success"})

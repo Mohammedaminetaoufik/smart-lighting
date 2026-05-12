@@ -24,6 +24,6 @@ func listUsers(ctx context.Context, db *sql.DB) ([]User, error) {
 
 func insertUser(ctx context.Context, db *sql.DB, u User) (int, error) {
 	var id int
-	err := db.QueryRowContext(ctx, "INSERT INTO users (full_name, email, role, status) VALUES (,,,) RETURNING id", u.FullName, u.Email, u.Role, u.Status).Scan(&id)
+	err := db.QueryRowContext(ctx, "INSERT INTO users (full_name, email, role, status) VALUES ($1, $2, $3, $4) RETURNING id", u.FullName, u.Email, u.Role, u.Status).Scan(&id)
 	return id, err
 }

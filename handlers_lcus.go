@@ -26,13 +26,34 @@ func handleCreateLCU(db *sql.DB) gin.HandlerFunc {
 			renderLCUs(c, db, PageData{Errors: errors, LCUForm: form})
 			return
 		}
-
 		if err := insertLCU(c.Request.Context(), db, lcu); err != nil {
 			renderLCUs(c, db, PageData{Errors: []string{"Erreur lors de l'enregistrement de la LCU."}, LCUForm: form})
 			return
 		}
-
 		c.Redirect(http.StatusSeeOther, "/lcus?success=1")
+	}
+}
+
+func handleCreateLCUJSON(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var lcu LCU
+		if err := c.BindJSON(&lcu); err != nil {
+			respondError(c, http.StatusBadRequest, "Invalid JSON")
+			return
+		}
+		if lcu.Reference == "" {
+			respondError(c, http.StatusBadRequest, "Reference requise")
+			return
+		}
+		if lcu.Status == "" {
+			lcu.Status = "unknown"
+		}
+		result, err := upsertLCUByReference(c.Request.Context(), db, lcu)
+		if err != nil {
+			respondError(c, http.StatusInternalServerError, "Erreur lors de l'enregistrement")
+			return
+		}
+		respondJSON(c, http.StatusCreated, result)
 	}
 }
 
@@ -162,7 +183,8 @@ func handleSyncLCU(db *sql.DB, adapter LCUAdapter) gin.HandlerFunc {
 		for _, d := range devices {
 			// Find existing lampadaire by device_uid and lcu_id
 			var existingID int
-			err := tx.QueryRowContext(c.Request.Context(), "SELECT id FROM lampadaires WHERE lcu_id = $1 AND device_uid = $2", id, d.DeviceUID).Scan(&existingID)
+			var existingCommStatus string
+			err := tx.QueryRowContext(c.Request.Context(), "SELECT id, commissioning_status FROM lampadaires WHERE lcu_id = $1 AND device_uid = $2", id, d.DeviceUID).Scan(&existingID, &existingCommStatus)
 
 			locStatus := "confirmed"
 			lat := d.Latitude
@@ -172,6 +194,15 @@ func handleSyncLCU(db *sql.DB, adapter LCUAdapter) gin.HandlerFunc {
 				locStatus = "estimated"
 				lat = lcu.Latitude
 				lng = lcu.Longitude
+			}
+
+			commStatus := "discovered"
+			if existingCommStatus != "" {
+				commStatus = existingCommStatus
+			}
+			// If location was missing and now we have it (or estimate it), mark as 'located' if it was 'discovered'
+			if commStatus == "discovered" && (lat != nil && lng != nil) {
+				commStatus = "located"
 			}
 
 			lamp := Lampadaire{
@@ -189,6 +220,7 @@ func handleSyncLCU(db *sql.DB, adapter LCUAdapter) gin.HandlerFunc {
 				NodeAddress:     d.NodeAddress,
 				DiscoveredByLCU: true,
 				LocationStatus:  locStatus,
+				CommissioningStatus: commStatus,
 			}
 
 			if err == sql.ErrNoRows {

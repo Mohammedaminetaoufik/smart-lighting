@@ -3,6 +3,7 @@ const lampadaires = window.LAMPADAIRES || [];
 const lcus = window.LCUS || [];
 let map, newMarker, editingLampadaire, autoSimInterval;
 let placementLampID = null;
+let currentMapMode = 'add_lcu'; // Modes: add_lcu, add_lampadaire_manual, place_missing_lampadaire, view
 
 document.querySelectorAll('.nav-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -23,6 +24,7 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
         if (page === 'energie') { loadEnergieStats(); }
         if (page === 'admin') { loadAdminSettings(); loadAdminUsers(); loadAccessLogs(); }
         if (page === 'interventions') { loadInterventions(); }
+        if (page === 'profiles') { loadLightingProfiles(); }
 
         // Mettre à jour l'URL sans recharger la page
         const url = new URL(window.location);
@@ -35,6 +37,18 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
 function fmt(d) { return d ? new Date(d).toLocaleString('fr-FR') : '—'; }
 function val(v, u) { return v != null ? (typeof v === 'number' ? v.toFixed(1) : v) + (u||'') : '—'; }
 function $(id) { return document.getElementById(id); }
+function esc(str) { const d = document.createElement('div'); d.textContent = str ?? '—'; return d.innerHTML; }
+function showToast(msg, type = 'error') {
+    const el = document.createElement('div');
+    el.className = 'alert-banner ' + type;
+    el.textContent = msg;
+    const content = document.querySelector('.content');
+    if (content) { content.prepend(el); setTimeout(() => el.remove(), 4000); }
+}
+function withLoading(el, promise) {
+    if (el) el.classList.add('loading');
+    return promise.finally(() => { if (el) el.classList.remove('loading'); });
+}
 
 function populateDropdowns() {
     ['dimmingLamp','calcLamp','simLamp'].forEach(id => {
@@ -90,7 +104,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 <span class="badge ${status}">${status}</span>
             </div>
             <div class="popup-body">
-                <small>${l.ip_address}:${l.port}</small><br/>
+                Nom: <strong>${l.name || '—'}</strong><br/>
+                IP: <strong>${l.ip_address}:${l.port}</strong> (${l.protocol})<br/>
                 Zone: <strong>${l.zone || '—'}</strong><br/>
                 Lampes reliées: <strong>${linkedLamps}</strong><br/>
                 Dernière sync: ${fmt(l.last_sync_at)}
@@ -98,6 +113,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="popup-actions">
                 <button onclick="testLCU(${l.id})" class="btn-sm">🔌 Tester</button>
                 <button onclick="syncLCU(${l.id})" class="btn-sm" style="background:var(--accent);color:#000;">🔄 Sync</button>
+                <button onclick="openLCUModal(${l.id})" class="btn-sm" style="background:var(--info);color:#fff;">Modifier</button>
             </div>
         </div>`;
 
@@ -124,7 +140,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 <span class="badge ${etat}">${etat}</span>
             </div>
             <div class="popup-body">
-                Statut: <span class="badge ${l.location_status}">${l.location_status}</span><br/>
+                Location: <span class="badge ${l.location_status}">${l.location_status}</span><br/>
+                Commissioning: <span class="badge status-${l.commissioning_status}">${l.commissioning_status}</span><br/>
+                <select onchange="updateCommissioning(${l.id}, this.value)" style="margin-top:5px;width:100%;font-size:11px;">
+                    <option value="">Changer statut...</option>
+                    <option value="discovered" ${l.commissioning_status==='discovered'?'selected':''}>Discovered</option>
+                    <option value="located" ${l.commissioning_status==='located'?'selected':''}>Located</option>
+                    <option value="configured" ${l.commissioning_status==='configured'?'selected':''}>Configured</option>
+                    <option value="tested" ${l.commissioning_status==='tested'?'selected':''}>Tested</option>
+                    <option value="commissioned" ${l.commissioning_status==='commissioned'?'selected':''}>Commissioned</option>
+                </select><br/>
                 LCU: <strong>${l.lcu_reference || '—'}</strong><br/>
                 Intensité: <strong>${l.intensite}%</strong><br/>
                 Zone: <strong>${l.zone||'—'}</strong>
@@ -132,7 +157,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="popup-actions">
                 <button onclick="editLamp(${l.id})" class="btn-sm" style="background:var(--info);color:#fff;">Modifier</button>
                 <button onclick="showDetailByID(${l.id})" class="btn-sm" style="background:var(--accent);color:#000;">Fiche</button>
-                <button onclick="centerMap(${l.latitude}, ${l.longitude})" class="btn-sm" style="background:var(--secondary);color:#fff;">Centrer</button>
+                <button onclick="startPlacementMode(${l.id})" class="btn-sm" style="background:var(--secondary);color:#fff;">Corriger loc.</button>
             </div></div>`;
 
         const marker = L.marker([l.latitude, l.longitude], { icon }).addTo(map).bindPopup(popup);
@@ -141,19 +166,38 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Map click
     map.on('click', function(e) {
-        if (placementLampID) {
-            confirmPlacement(e.latlng.lat, e.latlng.lng);
+        const lat = e.latlng.lat.toFixed(7);
+        const lng = e.latlng.lng.toFixed(7);
+
+        if (currentMapMode === 'place_missing_lampadaire') {
+            confirmPlacement(lat, lng);
             return;
         }
 
-        if (!editingLampadaire) setCreateMode();
-        const lat = e.latlng.lat.toFixed(7), lng = e.latlng.lng.toFixed(7);
-        $('latitude').value = lat; $('longitude').value = lng;
-        $('latitude_display').value = lat; $('longitude_display').value = lng;
-        $('helper').textContent = `Emplacement: ${lat}, ${lng}`;
-        if (form) form.classList.remove('form-hidden');
-        if (newMarker) map.removeLayer(newMarker);
-        newMarker = L.marker([lat, lng]).addTo(map).bindPopup('Nouveau lampadaire').openPopup();
+        if (currentMapMode === 'add_lcu') {
+            $('lcu_lat_map').value = lat;
+            $('lcu_lng_map').value = lng;
+            $('helper').textContent = `LCU: ${lat}, ${lng}`;
+            $('mapFormLcu').classList.remove('form-hidden');
+            $('formLampadaire').classList.add('form-hidden');
+            if (newMarker) map.removeLayer(newMarker);
+            newMarker = L.marker([lat, lng]).addTo(map).bindPopup('Nouvelle Gateway').openPopup();
+            return;
+        }
+
+        if (currentMapMode === 'add_lampadaire_manual') {
+            if (!editingLampadaire) setCreateMode();
+            $('latitude').value = lat;
+            $('longitude').value = lng;
+            $('latitude_display').value = lat;
+            $('longitude_display').value = lng;
+            $('helper').textContent = `Lampadaire: ${lat}, ${lng}`;
+            $('formLampadaire').classList.remove('form-hidden');
+            $('mapFormLcu').classList.add('form-hidden');
+            if (newMarker) map.removeLayer(newMarker);
+            newMarker = L.marker([lat, lng]).addTo(map).bindPopup('Nouveau lampadaire').openPopup();
+            return;
+        }
     });
 
     // Détection automatique de la vue au chargement via l'URL
@@ -172,10 +216,44 @@ function setCreateMode() {
     const form = $('formLampadaire');
     if (form) form.action = '/lampadaires';
     $('lampadaire_id').value = '';
-    $('formMode').textContent = 'Ajouter un lampadaire';
+    const title = $('formModeTitle');
+    if (title && currentMapMode === 'add_lampadaire_manual') title.textContent = 'Ajouter un lampadaire';
     $('submitButton').textContent = 'Ajouter';
     $('cancelEdit').classList.add('form-hidden');
     editingLampadaire = null;
+}
+
+// --- Map Modes ---
+function setMapMode(mode) {
+    currentMapMode = mode;
+    const indicator = $('mapModeIndicator');
+    const title = $('formModeTitle');
+    const instructions = $('formInstructions');
+    
+    // Reset
+    if (newMarker) { map.removeLayer(newMarker); newMarker = null; }
+    $('mapFormLcu').classList.add('form-hidden');
+    $('formLampadaire').classList.add('form-hidden');
+    $('helper').textContent = 'Aucun emplacement sélectionné.';
+
+    if (mode === 'add_lcu') {
+        indicator.textContent = 'Mode: Ajouter LCU / Gateway';
+        title.textContent = 'Ajouter une LCU';
+        instructions.textContent = 'Cliquez sur la carte pour placer la Gateway.';
+    } else if (mode === 'add_lampadaire_manual') {
+        indicator.textContent = 'Mode: Ajouter lampadaire manuel';
+        title.textContent = 'Ajouter un lampadaire';
+        instructions.textContent = 'Cliquez sur la carte pour choisir un emplacement.';
+        setCreateMode();
+    } else if (mode === 'view') {
+        indicator.textContent = 'Mode: Consultation';
+        title.textContent = 'Consultation';
+        instructions.textContent = 'Cliquez sur un équipement pour voir les détails.';
+    } else if (mode === 'place_missing_lampadaire') {
+        indicator.textContent = 'Mode: Placement assisté';
+        title.textContent = 'Placer équipement';
+        instructions.textContent = 'Cliquez sur la carte pour localiser le lampadaire.';
+    }
 }
 
 function fillForm(l) {
@@ -232,22 +310,22 @@ function showDetailByID(id) {
     fetch(`/api/lampadaires/${id}`).then(r => r.json()).then(l => {
         $('detailTitle').textContent = `Fiche: ${l.reference}`;
         let html = `<div class="detail-section"><h4>Informations générales</h4><div class="detail-grid">
-            <div class="detail-item"><div class="dl">Référence</div><div class="dv">${l.reference}</div></div>
-            <div class="detail-item"><div class="dl">Zone</div><div class="dv">${l.zone||'—'}</div></div>
-            <div class="detail-item"><div class="dl">Quartier</div><div class="dv">${l.quartier||'—'}</div></div>
-            <div class="detail-item"><div class="dl">Adresse</div><div class="dv">${l.address||'—'}</div></div>
+            <div class="detail-item"><div class="dl">Référence</div><div class="dv">${esc(l.reference)}</div></div>
+            <div class="detail-item"><div class="dl">Zone</div><div class="dv">${esc(l.zone)}</div></div>
+            <div class="detail-item"><div class="dl">Quartier</div><div class="dv">${esc(l.quartier)}</div></div>
+            <div class="detail-item"><div class="dl">Adresse</div><div class="dv">${esc(l.address)}</div></div>
             <div class="detail-item"><div class="dl">Position</div><div class="dv">${l.latitude}, ${l.longitude}</div></div>
-            <div class="detail-item"><div class="dl">Installation</div><div class="dv">${l.date_installation||'—'}</div></div>
+            <div class="detail-item"><div class="dl">Installation</div><div class="dv">${esc(l.date_installation)}</div></div>
         </div></div>`;
         html += `<div class="detail-section"><h4>Configuration technique</h4><div class="detail-grid">
-            <div class="detail-item"><div class="dl">Type driver</div><div class="dv">${l.type_driver||'—'}</div></div>
-            <div class="detail-item"><div class="dl">Réf. driver</div><div class="dv">${l.driver_reference||'—'}</div></div>
-            <div class="detail-item"><div class="dl">Protocole</div><div class="dv">${l.protocole||'—'}</div></div>
-            <div class="detail-item"><div class="dl">LCU / Gateway</div><div class="dv">${l.lcu_reference||'—'}</div></div>
-            <div class="detail-item"><div class="dl">Puissance</div><div class="dv">${l.puissance?l.puissance+'W':'—'}</div></div>
+            <div class="detail-item"><div class="dl">Type driver</div><div class="dv">${esc(l.type_driver)}</div></div>
+            <div class="detail-item"><div class="dl">Réf. driver</div><div class="dv">${esc(l.driver_reference)}</div></div>
+            <div class="detail-item"><div class="dl">Protocole</div><div class="dv">${esc(l.protocole)}</div></div>
+            <div class="detail-item"><div class="dl">LCU / Gateway</div><div class="dv">${esc(l.lcu_reference)}</div></div>
+            <div class="detail-item"><div class="dl">Puissance</div><div class="dv">${l.puissance ? l.puissance + 'W' : '—'}</div></div>
         </div></div>`;
         html += `<div class="detail-section"><h4>État opérationnel</h4><div class="detail-grid">
-            <div class="detail-item"><div class="dl">État</div><div class="dv"><span class="badge ${l.etat}">${l.etat}</span></div></div>
+            <div class="detail-item"><div class="dl">État</div><div class="dv"><span class="badge ${esc(l.etat)}">${esc(l.etat)}</span></div></div>
             <div class="detail-item"><div class="dl">Intensité</div><div class="dv">${l.intensite}%</div></div>
             <div class="detail-item"><div class="dl">Dernière comm.</div><div class="dv">${fmt(l.last_seen_at)}</div></div>
             <div class="detail-item"><div class="dl">Dernière cmd</div><div class="dv">${fmt(l.last_command_at)}</div></div>
@@ -315,7 +393,7 @@ function loadDashboard() {
 
         const tl = s.recent_telemetry || [];
         $('dashTelemetry').innerHTML = tl.length ? tl.map(t=>`<li><span>📡 #${t.lampadaire_id} · ${val(t.puissance,'W')} · ${val(t.temperature,'°C')}</span><span class="activity-time">${fmt(t.created_at)}</span></li>`).join('') : '<li>Aucune donnée</li>';
-    });
+    }).catch(e => showToast('Erreur chargement dashboard: ' + e.message));
 }
 
 // --- Alerts ---
@@ -326,7 +404,7 @@ function loadAlertCounts() {
             <div class="stat-card"><div class="stat-label">Critiques</div><div class="stat-value red">${c.critical}</div></div>
             <div class="stat-card"><div class="stat-label">Warning</div><div class="stat-value orange">${c.warning}</div></div>
             <div class="stat-card"><div class="stat-label">Résolues</div><div class="stat-value green">${c.resolved}</div></div>`;
-    });
+    }).catch(e => showToast('Erreur chargement alertes: ' + e.message));
 }
 
 function loadAlerts() {
@@ -340,9 +418,12 @@ function loadAlerts() {
             <td>${fmt(a.created_at)}</td><td>${a.reference||'#'+(a.lampadaire_id||'—')}</td>
             <td>${a.type}</td><td><span class="badge ${a.severity}">${a.severity}</span></td>
             <td>${a.message}</td><td><span class="badge ${a.status}">${a.status}</span></td>
-            <td>${a.status==='open'?`<button class="btn btn-primary btn-sm" onclick="resolveAlert(${a.id})">Résoudre</button>`:''}</td>
+            <td>
+                ${a.status==='open'?`<button class="btn btn-primary btn-sm" onclick="resolveAlert(${a.id})">Résoudre</button>`:''}
+                ${a.status==='open'?`<button class="btn btn-secondary btn-sm" onclick="openInterventionModal(${a.id})">🔧 Intervention</button>`:''}
+            </td>
         </tr>`).join('') || '<tr><td colspan="7">Aucune alerte</td></tr>';
-    });
+    }).catch(e => showToast('Erreur chargement alertes: ' + e.message));
 }
 
 function resolveAlert(id) {
@@ -350,16 +431,16 @@ function resolveAlert(id) {
 }
 
 // --- Dimming ---
-function applyDimming() {
+function applyDimming(btn) {
     const id = $('dimmingLamp').value;
     if (!id) { alert('Sélectionnez un lampadaire'); return; }
-    fetch(`/api/lampadaires/${id}/dimming`, {
+    withLoading(btn, fetch(`/api/lampadaires/${id}/dimming`, {
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ new_intensity: parseInt($('dimmingSlider').value), source:'admin', reason: $('dimmingReason').value||'Commande manuelle' })
     }).then(r=>r.json()).then(d => {
         $('dimmingResult').innerHTML = `<div class="alert-banner success">✅ Dimming appliqué: ${d.command.old_intensity}% → ${d.command.new_intensity}%</div>`;
         loadDimmingHistory();
-    });
+    }).catch(e => { showToast('Erreur dimming: ' + e.message); }));
 }
 
 function loadDimmingHistory() {
@@ -408,23 +489,23 @@ function loadCalcHistory(id) {
 }
 
 // --- Simulation ---
-function simulateOne() {
+function simulateOne(btn) {
     const id = $('simLamp').value;
     if (!id) { alert('Sélectionnez un lampadaire'); return; }
-    fetch(`/api/simulator/telemetry/${id}`, {method:'POST'}).then(r=>r.json()).then(d => {
+    withLoading(btn, fetch(`/api/simulator/telemetry/${id}`, {method:'POST'}).then(r=>r.json()).then(d => {
         const m = d.measurement;
         $('simResult').innerHTML = `<div class="alert-banner success">✅ Mesure générée pour #${m.lampadaire_id}</div>`;
         loadSimHistory(id);
         if (d.alerts && d.alerts.length) {
             $('simResult').innerHTML += `<div class="alert-banner error">⚠️ ${d.alerts.length} alerte(s) générée(s)</div>`;
         }
-    });
+    }).catch(e => showToast('Erreur simulation: ' + e.message)));
 }
 
 function simulateAll() {
     fetch('/api/simulator/telemetry/all', {method:'POST'}).then(r=>r.json()).then(d => {
         $('simResult').innerHTML = `<div class="alert-banner success">✅ ${d.count} mesures générées</div>`;
-    });
+    }).catch(e => showToast('Erreur simulation: ' + e.message));
 }
 
 function loadSimHistory(id) {
@@ -445,6 +526,18 @@ function toggleAutoSim() {
         btn.textContent = '▶ Auto-simulation';
         btn.classList.remove('btn-danger');
         btn.classList.add('btn-secondary');
+    } else {
+        const id = $('simLamp').value;
+        if (!id) { alert('Sélectionnez un lampadaire'); return; }
+        autoSimInterval = setInterval(() => {
+            fetch(`/api/simulator/telemetry/${id}`, { method: 'POST' })
+                .then(r => r.json())
+                .then(() => loadSimHistory(id))
+                .catch(e => console.error('Auto-sim error:', e));
+        }, 5000);
+        btn.textContent = '⏹ Arrêter';
+        btn.classList.remove('btn-secondary');
+        btn.classList.add('btn-danger');
     }
 }
 
@@ -467,28 +560,33 @@ function loadLCUs() {
             <div class="lcu-card">
                 <div class="lcu-card-header">
                     <div>
-                        <strong style="font-size:16px;">${l.reference}</strong><br/>
-                        <small style="color:var(--text-dim);">${l.name || 'Sans nom'}</small>
+                        <strong style="font-size:16px;">${esc(l.reference)}</strong><br/>
+                        <small style="color:var(--text-dim);">${esc(l.name) || 'Sans nom'}</small>
                     </div>
-                    <span class="badge ${l.status}">${l.status}</span>
+                    <span class="badge ${esc(l.status)}">${esc(l.status)}</span>
                 </div>
                 <div class="lcu-card-stats">
-                    <div>🌐 IP: ${l.ip_address}:${l.port}</div>
-                    <div>🛠️ Protocole: ${l.protocol}</div>
+                    <div>🌐 IP: ${esc(l.ip_address)}:${l.port}</div>
+                    <div>🛠️ Protocole: ${esc(l.protocol)}</div>
                     <div>🕒 Dern. comm: ${fmt(l.last_seen_at)}</div>
                     <div>🔄 Dern. sync: ${fmt(l.last_sync_at)}</div>
                 </div>
                 <div class="lcu-card-actions">
-                    <button class="btn btn-secondary btn-sm" onclick="testLCU(${l.id})">🔌 Test</button>
-                    <button class="btn btn-primary btn-sm" onclick="syncLCU(${l.id})">🔄 Sync</button>
+                    <button class="btn btn-secondary btn-sm" onclick="testLCU(${l.id}, this)">🔌 Test</button>
+                    <button class="btn btn-primary btn-sm" onclick="syncLCU(${l.id}, this)">🔄 Sync</button>
                     <button class="btn btn-secondary btn-sm" onclick="openLCUModal(${JSON.stringify(l).replace(/"/g, '&quot;')})">⚙️ Config</button>
                 </div>
             </div>
         `).join('') || '<p>Aucune LCU enregistrée.</p>';
-    });
+    }).catch(e => showToast('Erreur chargement LCUs: ' + e.message));
 }
 
-function openLCUModal(lcu = null) {
+function openLCUModal(input = null) {
+    let lcu = input;
+    if (typeof input === 'number') {
+        lcu = lcus.find(x => x.id === input);
+    }
+    
     $('lcuModal').classList.remove('hidden');
     if (lcu) {
         $('lcuFormMode').textContent = 'Modifier la Gateway';
@@ -513,62 +611,20 @@ function openLCUModal(lcu = null) {
 
 function closeLCUModal() { $('lcuModal').classList.add('hidden'); }
 
-function testLCU(id) {
-    fetch(`/api/lcus/${id}/test`, {method:'POST'}).then(r=>r.json()).then(d => {
+function testLCU(id, btn) {
+    withLoading(btn, fetch(`/api/lcus/${id}/test`, {method:'POST'}).then(r=>r.json()).then(d => {
         alert(d.message || "Test réussi");
         loadLCUs();
-    }).catch(e => alert("Erreur: " + e.message));
+    }).catch(e => showToast("Erreur test LCU: " + e.message)));
 }
 
-function syncLCU(id) {
-    fetch(`/api/lcus/${id}/sync`, {method:'POST'}).then(r=>r.json()).then(d => {
+function syncLCU(id, btn) {
+    withLoading(btn, fetch(`/api/lcus/${id}/sync`, {method:'POST'}).then(r=>r.json()).then(d => {
         alert(d.message || "Synchronisation réussie");
         loadLCUs();
         if (window.location.search.includes('view=carte')) window.location.reload();
-    }).catch(e => alert("Erreur: " + e.message));
+    }).catch(e => showToast("Erreur sync LCU: " + e.message)));
 }
-
-// --- Location Correction ---
-function loadMissingLocation() {
-    fetch('/api/lampadaires/missing-location').then(r=>r.json()).then(list => {
-        $('missingLocationBody').innerHTML = (list||[]).map(l => `
-            <tr>
-                <td><strong>${l.reference}</strong></td>
-                <td>${l.lcu_reference || '—'}</td>
-                <td><code style="font-size:11px;">${l.device_uid}</code></td>
-                <td>${l.node_address || '—'}</td>
-                <td>${l.zone || '—'}</td>
-                <td><button class="btn btn-primary btn-sm" onclick="startPlacement(${l.id})">📍 Placer sur carte</button></td>
-            </tr>
-        `).join('') || '<tr><td colspan="6">Aucun équipement à localiser.</td></tr>';
-    });
-}
-
-function startPlacement(id) {
-    placementLampID = id;
-    document.querySelector('.nav-btn[data-page="carte"]').click();
-    $('placementBanner').classList.remove('hidden');
-}
-
-function cancelPlacementMode() {
-    placementLampID = null;
-    $('placementBanner').classList.add('hidden');
-}
-
-function confirmPlacement(lat, lng) {
-    if (!placementLampID) return;
-    if (confirm(`Confirmer la position (${lat.toFixed(5)}, ${lng.toFixed(5)}) ?`)) {
-        fetch(`/api/lampadaires/${placementLampID}/location`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ latitude: lat, longitude: lng, status: 'confirmed' })
-        }).then(r => r.json()).then(() => {
-            alert("Position enregistrée !");
-            window.location.href = "/?view=carte";
-        });
-    }
-}
-
 
 // --- NOUVEAUX MODULES ---
 async function loadEnergieStats() {
@@ -595,8 +651,228 @@ async function loadEnergieStats() {
 function reloadApp() {} // placeholder
 function exportEnergyReport() { window.location.href = '/api/reports/export?type=energy'; }
 
-async function loadInterventions() {}
-async function loadAdminUsers() {}
-async function loadAccessLogs() {}
-async function loadAdminSettings() {}
-async function toggleSetting(key, val) {}
+async function loadAdminUsers() {
+    try {
+        const r = await fetch('/api/users');
+        const users = await r.json();
+        $('adminUserList').innerHTML = users.map(u => `<tr>
+            <td>${u.full_name}</td>
+            <td>${u.email}</td>
+            <td><span class="badge">${u.role}</span></td>
+            <td><span class="badge ${u.status}">${u.status}</span></td>
+            <td><button class="btn btn-secondary btn-sm" onclick="editUser(${u.id})">Modifier</button></td>
+        </tr>`).join('');
+    } catch(e) {}
+}
+
+async function loadAccessLogs() {
+    try {
+        const r = await fetch('/api/logs');
+        const logs = await r.json();
+        $('adminAccessLogs').innerHTML = logs.map(l => `<li><strong>${l.action}</strong> <small>${fmt(l.created_at)}</small></li>`).join('');
+    } catch(e) {}
+}
+
+async function loadAdminSettings() {
+    // Placeholder for settings
+}
+
+async function toggleSetting(key, val) {
+    fetch('/api/admin/settings', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({key, value: val ? 'true' : 'false'})
+    });
+}
+
+// --- Commissioning ---
+function updateCommissioning(id, status) {
+    if (!status) return;
+    fetch(`/api/lampadaires/${id}/commissioning`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({commissioning_status: status})
+    }).then(r => r.json()).then(d => {
+        if (d.error) {
+            alert("Erreur: " + d.error);
+        } else {
+            alert("Statut de commissioning mis à jour !");
+            window.location.reload();
+        }
+    });
+}
+
+// --- Lighting Profiles ---
+function loadLightingProfiles() {
+    fetch('/api/lighting-profiles').then(r => r.json()).then(data => {
+        $('profileListBody').innerHTML = data.map(p => `<tr>
+            <td><strong>${p.name}</strong></td>
+            <td>${p.target_value}</td>
+            <td><span class="badge">${p.target_type}</span></td>
+            <td><span class="badge ${p.enabled ? 'online' : 'offline'}">${p.enabled ? 'Actif' : 'Inactif'}</span></td>
+            <td><small>${p.schedules?.map(s => `${s.start_time}-${s.end_time}: ${s.intensity}%`).join('<br>') || '—'}</small></td>
+            <td>
+                <button class="btn btn-primary btn-sm" onclick="applyProfile(${p.id})">🚀 Appliquer</button>
+                <button class="btn btn-secondary btn-sm" onclick="toggleProfile(${p.id}, ${p.enabled})">${p.enabled ? 'Désactiver' : 'Activer'}</button>
+            </td>
+        </tr>`).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--text-dim);">Aucun profil défini.</td></tr>';
+    });
+}
+
+function openProfileModal() {
+    $('profileModal').classList.remove('hidden');
+}
+
+function saveProfile() {
+    const p = {
+        name: $('prof_name').value,
+        description: $('prof_desc').value,
+        target_type: $('prof_target_type').value,
+        target_value: $('prof_target_value').value,
+        enabled: true,
+        schedules: [{
+            start_time: $('prof_start').value,
+            end_time: $('prof_end').value,
+            intensity: parseInt($('prof_intensity').value)
+        }]
+    };
+    fetch('/api/lighting-profiles', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(p)
+    }).then(r => {
+        if(r.ok) {
+            $('profileModal').classList.add('hidden');
+            loadLightingProfiles();
+        }
+    });
+}
+
+function applyProfile(id) {
+    fetch(`/api/lighting-profiles/${id}/apply`, {method: 'POST'}).then(r => r.json()).then(d => {
+        alert(`Profil appliqué à ${d.count} lampadaire(s).`);
+    });
+}
+
+function toggleProfile(id, current) {
+    fetch(`/api/lighting-profiles/${id}/${current ? 'disable' : 'enable'}`, {method: 'POST'}).then(() => loadLightingProfiles());
+}
+
+// --- Interventions ---
+async function loadInterventions() {
+    fetch('/api/interventions').then(r => r.json()).then(data => {
+        $('interventionListBody').innerHTML = data.map(i => `<tr>
+            <td>#${i.id}</td>
+            <td><strong>${esc(i.title)}</strong></td>
+            <td>${i.alert_id ? '#' + i.alert_id : '—'}</td>
+            <td>#${i.lampadaire_id}</td>
+            <td>${esc(i.assigned_to)}</td>
+            <td><span class="badge ${esc(i.priority)}">${esc(i.priority)}</span></td>
+            <td><span class="badge ${esc(i.status)}">${esc(i.status)}</span></td>
+            <td>${fmt(i.created_at)}</td>
+            <td>
+                ${i.status === 'open' ? `<button class="btn btn-primary btn-sm" onclick="updateInterventionStatus(${i.id}, 'start')">▶ Démarrer</button>` : ''}
+                ${i.status === 'in_progress' ? `<button class="btn btn-success btn-sm" onclick="updateInterventionStatus(${i.id}, 'resolve')">✔️ Résoudre</button>` : ''}
+                ${(i.status === 'resolved' || i.status === 'in_progress') ? `<button class="btn btn-secondary btn-sm" onclick="closeIntervention(${i.id})">🔒 Clôturer</button>` : ''}
+            </td>
+        </tr>`).join('') || '<tr><td colspan="9" style="text-align:center;color:var(--text-dim);">Aucune intervention en cours.</td></tr>';
+    }).catch(e => showToast('Erreur chargement interventions: ' + e.message));
+}
+
+function openInterventionModal(alertId = null) {
+    $('int_alert_id').value = alertId || '';
+    $('int_title').value = alertId ? `Intervention sur alerte #${alertId}` : '';
+    $('interventionModal').classList.remove('hidden');
+    
+    // Populate tech list
+    fetch('/api/users').then(r => r.json()).then(users => {
+        const sel = $('int_assigned_to');
+        sel.innerHTML = '<option value="">Non assigné</option>' + 
+            users.filter(u => u.role === 'technicien' || u.role === 'admin').map(u => `<option value="${u.id}">${u.full_name}</option>`).join('');
+    });
+}
+
+function saveIntervention() {
+    const alertId = $('int_alert_id').value;
+    const url = alertId ? `/api/alerts/${alertId}/intervention` : '/api/interventions';
+    const body = {
+        title: $('int_title').value,
+        description: $('int_desc').value,
+        priority: $('int_priority').value,
+        assigned_to: $('int_assigned_to').value ? parseInt($('int_assigned_to').value) : null
+    };
+    
+    fetch(url, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body)
+    }).then(r => {
+        if(r.ok) {
+            $('interventionModal').classList.add('hidden');
+            loadInterventions();
+        }
+    });
+}
+
+function updateInterventionStatus(id, action) {
+    fetch(`/api/interventions/${id}/${action}`, {method: 'POST'}).then(() => loadInterventions());
+}
+
+function closeIntervention(id) {
+    if(confirm("Voulez-vous clôturer cette intervention ? Cela résoudra également l'alerte liée.")) {
+        fetch(`/api/interventions/${id}/close`, {method: 'POST'}).then(() => loadInterventions());
+    }
+}
+
+// --- Assisted Localization ---
+function loadMissingLocation() {
+    fetch('/api/lampadaires/missing-location').then(r => r.json()).then(data => {
+        $('missingLocationBody').innerHTML = data.map(l => `<tr>
+            <td><strong>${l.reference}</strong></td>
+            <td>${l.lcu_id || '—'}</td>
+            <td><code>${l.device_uid || '—'}</code></td>
+            <td>${l.node_address || '—'}</td>
+            <td>${l.zone || '—'}</td>
+            <td><span class="badge ${l.etat}">${l.etat}</span></td>
+            <td>
+                <button class="btn btn-primary btn-sm" onclick="startPlacementMode(${l.id})">📍 Localiser sur carte</button>
+            </td>
+        </tr>`).join('') || '<tr><td colspan="7" style="text-align:center;color:var(--text-dim);">Tous les lampadaires sont localisés.</td></tr>';
+    });
+}
+
+function startPlacementMode(id) {
+    placementLampID = id;
+    currentMapMode = 'place_missing_lampadaire';
+    document.querySelectorAll('.nav-btn[data-page="carte"]')[0].click();
+    $('placementBanner').classList.remove('hidden');
+    $('mapModeIndicator').textContent = "Mode: Positionnement de l'équipement";
+    $('mapModeIndicator').style.background = "rgba(239,68,68,0.1)";
+    $('mapModeIndicator').style.borderColor = "rgba(239,68,68,0.2)";
+    $('mapModeIndicator').style.color = "#ef4444";
+}
+
+function cancelPlacementMode() {
+    placementLampID = null;
+    currentMapMode = 'view';
+    $('placementBanner').classList.add('hidden');
+    $('mapModeIndicator').textContent = "Mode: Consultation";
+    $('mapModeIndicator').style.background = "rgba(34,197,94,0.1)";
+    $('mapModeIndicator').style.borderColor = "rgba(34,197,94,0.2)";
+    $('mapModeIndicator').style.color = "var(--accent)";
+}
+
+function confirmPlacement(lat, lng) {
+    if (!placementLampID) return;
+    if (confirm(`Confirmer la position (${lat}, ${lng}) pour le lampadaire #${placementLampID} ?`)) {
+        fetch(`/api/lampadaires/${placementLampID}/location`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({latitude: parseFloat(lat), longitude: parseFloat(lng)})
+        }).then(r => r.json()).then(d => {
+            alert("Emplacement enregistré !");
+            cancelPlacementMode();
+            window.location.reload();
+        });
+    }
+}

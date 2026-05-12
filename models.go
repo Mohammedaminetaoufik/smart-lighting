@@ -29,8 +29,9 @@ type Lampadaire struct {
 	LCUID           *int   `json:"lcu_id,omitempty"`
 	DeviceUID       string `json:"device_uid,omitempty"`
 	NodeAddress     string `json:"node_address,omitempty"`
-	DiscoveredByLCU bool   `json:"discovered_by_lcu"`
-	LocationStatus  string `json:"location_status"`
+	DiscoveredByLCU     bool   `json:"discovered_by_lcu"`
+	LocationStatus      string `json:"location_status"`
+	CommissioningStatus string `json:"commissioning_status"`
 }
 
 // LCU represents a Local Control Unit / Gateway.
@@ -176,6 +177,7 @@ type FormData struct {
 	DeviceUID      string
 	NodeAddress    string
 	LocationStatus string
+	CommissioningStatus string
 }
 
 // PageData is the data passed to the main HTML template.
@@ -217,25 +219,26 @@ type DashboardStats struct {
 }
 
 type User struct {
-	ID        int
-	FullName  string
-	Email     string
-	Role      string
-	Status    string
-	CreatedAt string
+	ID        int       `json:"id"`
+	FullName  string    `json:"full_name"`
+	Email     string    `json:"email"`
+	Role      string    `json:"role"`
+	Status    string    `json:"status"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type Intervention struct {
-	ID           int
-	AlertID      *int
-	LampadaireID *int
-	AssignedTo   *int
-	Title        string
-	Description  string
-	Priority     string
-	Status       string
-	CreatedAt    string
-	ClosedAt     *string
+	ID           int        `json:"id"`
+	AlertID      *int       `json:"alert_id,omitempty"`
+	LampadaireID *int       `json:"lampadaire_id,omitempty"`
+	AssignedTo   *int       `json:"assigned_to,omitempty"`
+	Title        string     `json:"title"`
+	Description  string     `json:"description,omitempty"`
+	Priority     string     `json:"priority"`
+	Status       string     `json:"status"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+	ClosedAt     *time.Time `json:"closed_at,omitempty"`
 }
 
 type SystemSetting struct {
@@ -264,4 +267,38 @@ type EnergyZoneSummary struct {
 	EstimatedCurrentPowerW float64 `json:"estimated_current_power_w"`
 	EstimatedSavingW       float64 `json:"estimated_saving_w"`
 	EstimatedSavingPercent float64 `json:"estimated_saving_percent"`
+}
+
+// LightingGroup represents a logical collection of lampadaires.
+type LightingGroup struct {
+	ID          int       `json:"id"`
+	Name        string    `json:"name"`
+	Zone        string    `json:"zone,omitempty"`
+	Description string    `json:"description,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// LightingProfile represents a dimming strategy for a zone or group.
+type LightingProfile struct {
+	ID          int                       `json:"id"`
+	Name        string                    `json:"name"`
+	Description string                    `json:"description,omitempty"`
+	TargetType  string                    `json:"target_type"`  // zone, group, lcu
+	TargetValue string                    `json:"target_value"` // e.g. "Zone A" or GroupID
+	Enabled     bool                      `json:"enabled"`
+	Schedules   []LightingProfileSchedule `json:"schedules,omitempty"`
+	CreatedAt   time.Time                 `json:"created_at"`
+	UpdatedAt   time.Time                 `json:"updated_at"`
+}
+
+// LightingProfileSchedule represents a specific timing within a lighting profile.
+type LightingProfileSchedule struct {
+	ID         int       `json:"id"`
+	ProfileID  int       `json:"profile_id"`
+	StartTime  string    `json:"start_time"` // HH:MM
+	EndTime    string    `json:"end_time"`   // HH:MM
+	Intensity  int       `json:"intensity"`
+	DaysOfWeek string    `json:"days_of_week,omitempty"` // 1,2,3,4,5,6,7
+	CreatedAt  time.Time `json:"created_at"`
 }

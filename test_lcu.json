@@ -1,0 +1,9 @@
+{
+    "reference": "LCU-TEST-001",
+    "name": "Test",
+    "ip_address": "127.0.0.1",
+    "port": 9091,
+    "protocol": "HTTP",
+    "zone": "Zone A",
+    "status": "online"
+}
