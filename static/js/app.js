@@ -63,10 +63,17 @@ function populateDropdowns() {
 
 // --- Map Init ---
 document.addEventListener('DOMContentLoaded', () => {
-    map = L.map('map', { maxZoom: 20 }).setView([34.0209, -6.8416], 13);
+    const savedView = (() => { try { return JSON.parse(localStorage.getItem('mapView')); } catch { return null; } })();
+    const initCenter = (savedView && savedView.lat != null) ? [savedView.lat, savedView.lng] : [34.0209, -6.8416];
+    const initZoom   = (savedView && savedView.zoom != null) ? savedView.zoom : 13;
+    map = L.map('map', { maxZoom: 20 }).setView(initCenter, initZoom);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: 'OpenStreetMap', maxZoom: 20, maxNativeZoom: 19
     }).addTo(map);
+    map.on('moveend zoomend', () => {
+        const c = map.getCenter();
+        localStorage.setItem('mapView', JSON.stringify({ lat: c.lat, lng: c.lng, zoom: map.getZoom() }));
+    });
 
     const form = $('formLampadaire');
     const intensiteInput = $('intensite');
@@ -712,6 +719,7 @@ function loadLightingProfiles() {
             <td><span class="badge ${p.enabled ? 'online' : 'offline'}">${p.enabled ? 'Actif' : 'Inactif'}</span></td>
             <td><small>${p.schedules?.map(s => `${s.start_time}-${s.end_time}: ${s.intensity}%`).join('<br>') || '—'}</small></td>
             <td>
+                <button class="btn btn-secondary btn-sm" onclick="openProfileDetails(${p.id})">🔍 Détails</button>
                 <button class="btn btn-primary btn-sm" onclick="applyProfile(${p.id})">🚀 Appliquer</button>
                 <button class="btn btn-secondary btn-sm" onclick="toggleProfile(${p.id}, ${p.enabled})">${p.enabled ? 'Désactiver' : 'Activer'}</button>
             </td>
@@ -719,7 +727,40 @@ function loadLightingProfiles() {
     });
 }
 
+function populateTargetValueOptions() {
+    const type = $('prof_target_type').value;
+    const sel = $('prof_target_value');
+    sel.innerHTML = '';
+    let options = [];
+    if (type === 'zone') {
+        options = [...new Set(lampadaires.map(l => l.zone).filter(Boolean))].sort();
+    } else if (type === 'lcu') {
+        // value=id so backend Atoi succeeds; label shows the human-readable reference
+        if (lcus.length === 0) {
+            sel.innerHTML = '<option value="">-- Aucune LCU disponible --</option>';
+            return;
+        }
+        sel.innerHTML = lcus.filter(l => l.id).sort((a,b)=>(a.reference||'').localeCompare(b.reference||''))
+            .map(l => `<option value="${l.id}">${l.reference || 'LCU #'+l.id}</option>`).join('');
+        return;
+    } else if (type === 'group') {
+        options = [...new Set(lampadaires.map(l => l.quartier).filter(Boolean))].sort();
+    }
+    if (options.length === 0) {
+        sel.innerHTML = '<option value="">-- Aucune valeur disponible --</option>';
+    } else {
+        sel.innerHTML = options.map(o => `<option value="${o}">${o}</option>`).join('');
+    }
+}
+
 function openProfileModal() {
+    $('prof_name').value = '';
+    $('prof_desc').value = '';
+    $('prof_target_type').value = 'zone';
+    $('prof_start').value = '19:00';
+    $('prof_end').value = '07:00';
+    $('prof_intensity').value = '80';
+    populateTargetValueOptions();
     $('profileModal').classList.remove('hidden');
 }
 
@@ -748,10 +789,54 @@ function saveProfile() {
     });
 }
 
-function applyProfile(id) {
-    fetch(`/api/lighting-profiles/${id}/apply`, {method: 'POST'}).then(r => r.json()).then(d => {
-        alert(`Profil appliqué à ${d.count} lampadaire(s).`);
+function openProfileDetails(id) {
+    const modal = $('profileDetailsModal');
+    $('pd_lampBody').innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-dim);">Chargement…</td></tr>';
+    $('pd_problems').style.display = 'none';
+    modal.classList.remove('hidden');
+
+    fetch(`/api/lighting-profiles/${id}/details`).then(r => r.json()).then(d => {
+        const p = d.profile;
+        $('pd_name').textContent = p.name;
+        $('pd_desc').textContent = p.description || '';
+        $('pd_target').textContent = `🎯 ${p.target_type === 'lcu' ? 'Gateway' : p.target_type === 'zone' ? 'Zone' : 'Groupe'}: ${p.target_value}`;
+        $('pd_schedule').textContent = `🕐 ${p.schedules?.map(s => `${s.start_time}–${s.end_time} · ${s.intensity}%`).join('  |  ') || 'Aucun horaire'}`;
+        $('pd_total').textContent = `💡 ${d.total} lampadaire${d.total !== 1 ? 's' : ''}`;
+
+        if (d.problematic > 0) {
+            $('pd_problems').textContent = `⚠ ${d.problematic} avec problème`;
+            $('pd_problems').style.display = 'inline-flex';
+        }
+
+        const lamps = d.lamps || [];
+        if (lamps.length === 0) {
+            $('pd_lampBody').innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-dim);">Aucun lampadaire trouvé pour cette cible.</td></tr>';
+            return;
+        }
+
+        $('pd_lampBody').innerHTML = lamps.map(l => {
+            const etatBadge = `<span class="badge ${l.etat}">${l.etat}</span>`;
+            const probCell = l.problem
+                ? `<span style="color:#f87171;font-size:12px;">⚠ ${l.problem}</span>`
+                : `<span style="color:#4ade80;font-size:12px;">✓ OK</span>`;
+            return `<tr style="${l.problem ? 'background:rgba(239,68,68,0.05);' : ''}">
+                <td><strong>${l.reference}</strong></td>
+                <td><small>${l.zone || '—'}</small></td>
+                <td>${etatBadge}</td>
+                <td>${l.intensite}%</td>
+                <td>${probCell}</td>
+            </tr>`;
+        }).join('');
+    }).catch(() => {
+        $('pd_lampBody').innerHTML = '<tr><td colspan="5" style="text-align:center;color:#f87171;">Erreur de chargement.</td></tr>';
     });
+}
+
+function applyProfile(id) {
+    fetch(`/api/lighting-profiles/${id}/apply`, {method: 'POST'}).then(r => r.json().then(d => {
+        if (!r.ok) { showToast('Erreur: ' + (d.error || r.status)); return; }
+        showToast(`Profil appliqué à ${d.count} lampadaire(s).`);
+    }));
 }
 
 function toggleProfile(id, current) {

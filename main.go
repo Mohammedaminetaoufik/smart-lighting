@@ -79,6 +79,7 @@ func main() {
 		api.GET("/lighting-profiles", handleGetLightingProfiles(db))
 		api.POST("/lighting-profiles", handleCreateLightingProfile(db))
 		api.POST("/lighting-profiles/:id/apply", handleApplyLightingProfile(db, lcuAdapter))
+		api.GET("/lighting-profiles/:id/details", handleGetLightingProfileDetails(db))
 		api.POST("/lighting-profiles/:id/enable", handleEnableLightingProfile(db))
 		api.POST("/lighting-profiles/:id/disable", handleDisableLightingProfile(db))
 

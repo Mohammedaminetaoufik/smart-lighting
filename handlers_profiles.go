@@ -87,8 +87,12 @@ func handleApplyLightingProfile(db *sql.DB, adapter LCUAdapter) gin.HandlerFunc 
 		case "lcu":
 			lcuID, err := strconv.Atoi(p.TargetValue)
 			if err != nil || lcuID <= 0 {
-				respondError(c, http.StatusBadRequest, "target_value invalide pour le type lcu")
-				return
+				// fallback: target_value might be a reference string
+				err2 := db.QueryRow("SELECT id FROM lcus WHERE reference = $1", p.TargetValue).Scan(&lcuID)
+				if err2 != nil || lcuID <= 0 {
+					respondError(c, http.StatusBadRequest, "target_value invalide pour le type lcu")
+					return
+				}
 			}
 			query = "SELECT id FROM lampadaires WHERE lcu_id = $1 AND archived_at IS NULL"
 			args = append(args, lcuID)
@@ -129,6 +133,108 @@ func handleApplyLightingProfile(db *sql.DB, adapter LCUAdapter) gin.HandlerFunc 
 		}
 
 		respondJSON(c, http.StatusOK, gin.H{"status": "applied", "count": len(lampIDs)})
+	}
+}
+
+func handleGetLightingProfileDetails(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, err := parseIDParam(c, "id")
+		if err != nil {
+			respondError(c, http.StatusBadRequest, "ID invalide")
+			return
+		}
+		p, err := getLightingProfileByID(db, id)
+		if err != nil {
+			respondError(c, http.StatusNotFound, "Profil introuvable")
+			return
+		}
+
+		var query string
+		var args []interface{}
+		switch p.TargetType {
+		case "zone", "group":
+			query = `SELECT id, reference, etat, intensite, zone, address, device_uid, lcu_id
+			         FROM lampadaires WHERE zone = $1 AND archived_at IS NULL ORDER BY reference`
+			args = append(args, p.TargetValue)
+		case "lcu":
+			lcuID, err := strconv.Atoi(p.TargetValue)
+			if err != nil || lcuID <= 0 {
+				db.QueryRow("SELECT id FROM lcus WHERE reference = $1", p.TargetValue).Scan(&lcuID)
+			}
+			query = `SELECT id, reference, etat, intensite, zone, address, device_uid, lcu_id
+			         FROM lampadaires WHERE lcu_id = $1 AND archived_at IS NULL ORDER BY reference`
+			args = append(args, lcuID)
+		default:
+			respondError(c, http.StatusBadRequest, "Type de cible inconnu")
+			return
+		}
+
+		rows, err := db.Query(query, args...)
+		if err != nil {
+			respondError(c, http.StatusInternalServerError, "Database error")
+			return
+		}
+		defer rows.Close()
+
+		type LampSummary struct {
+			ID        int     `json:"id"`
+			Reference string  `json:"reference"`
+			Etat      string  `json:"etat"`
+			Intensite int     `json:"intensite"`
+			Zone      string  `json:"zone"`
+			Address   string  `json:"address"`
+			DeviceUID string  `json:"device_uid"`
+			LCUID     *int    `json:"lcu_id"`
+			Problem   string  `json:"problem,omitempty"`
+		}
+
+		var lamps []LampSummary
+		for rows.Next() {
+			var l LampSummary
+			var addr, uid sql.NullString
+			if err := rows.Scan(&l.ID, &l.Reference, &l.Etat, &l.Intensite, &l.Zone, &addr, &uid, &l.LCUID); err != nil {
+				continue
+			}
+			l.Address = addr.String
+			l.DeviceUID = uid.String
+			// Diagnose potential issues
+			switch l.Etat {
+			case "offline":
+				l.Problem = "hors ligne"
+			case "maintenance":
+				l.Problem = "en maintenance"
+			}
+			if l.DeviceUID == "" {
+				if l.Problem != "" {
+					l.Problem += ", UID manquant"
+				} else {
+					l.Problem = "UID manquant (commande impossible)"
+				}
+			}
+			if l.LCUID == nil {
+				if l.Problem != "" {
+					l.Problem += ", non associé à une LCU"
+				} else {
+					l.Problem = "non associé à une LCU"
+				}
+			}
+			lamps = append(lamps, l)
+		}
+
+		total := len(lamps)
+		problematic := 0
+		for _, l := range lamps {
+			if l.Problem != "" {
+				problematic++
+			}
+		}
+
+		respondJSON(c, http.StatusOK, gin.H{
+			"profile":     p,
+			"lamps":       lamps,
+			"total":       total,
+			"problematic": problematic,
+		})
 	}
 }
 

@@ -463,13 +463,13 @@
             <div class="field"><label>Description</label><textarea id="prof_desc"></textarea></div>
             <div class="coords">
                 <div class="field"><label>Cible</label>
-                    <select id="prof_target_type">
+                    <select id="prof_target_type" onchange="populateTargetValueOptions()">
                         <option value="zone">Zone</option>
                         <option value="group">Groupe</option>
                         <option value="lcu">Gateway (LCU)</option>
                     </select>
                 </div>
-                <div class="field"><label>Valeur cible</label><input type="text" id="prof_target_value" placeholder="Nom zone ou ID" required></div>
+                <div class="field"><label>Valeur cible</label><select id="prof_target_value" required></select></div>
             </div>
             <div class="coords">
                 <div class="field"><label>Début</label><input type="time" id="prof_start" value="19:00"></div>
@@ -481,6 +481,30 @@
                 <button type="button" class="btn btn-secondary" onclick="$('profileModal').classList.add('hidden')">Annuler</button>
             </div>
         </form>
+    </div>
+</div>
+
+<div id="profileDetailsModal" class="modal-overlay hidden">
+    <div class="modal-box" style="max-width:760px;width:95%;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;">
+            <div>
+                <h3 id="pd_name" style="margin:0 0 4px 0;"></h3>
+                <p id="pd_desc" style="margin:0;color:var(--text-dim);font-size:13px;"></p>
+            </div>
+            <button class="btn btn-secondary btn-sm" onclick="$('profileDetailsModal').classList.add('hidden')">✕ Fermer</button>
+        </div>
+        <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
+            <div class="stat-chip" id="pd_target"></div>
+            <div class="stat-chip" id="pd_schedule"></div>
+            <div class="stat-chip" id="pd_total"></div>
+            <div class="stat-chip problem" id="pd_problems" style="display:none;"></div>
+        </div>
+        <div class="table-wrap" style="max-height:380px;overflow-y:auto;">
+            <table class="data-table">
+                <thead><tr><th>Référence</th><th>Zone</th><th>État</th><th>Intensité</th><th>Problème</th></tr></thead>
+                <tbody id="pd_lampBody"></tbody>
+            </table>
+        </div>
     </div>
 </div>
 
