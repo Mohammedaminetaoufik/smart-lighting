@@ -749,3 +749,47 @@ input[type="range"]::-webkit-slider-thumb {
     transform: scale(1.2) rotate(5deg);
     z-index: 1000 !important;
 }
+
+/* ── Basestations & Cabinets markers ─────────────── */
+.marker-basestation {
+    width: 20px; height: 20px;
+    background: #3b82f6;
+    border: 2px solid #fff;
+    border-radius: 4px;
+    transform: rotate(45deg);
+    box-shadow: 0 2px 8px rgba(59,130,246,0.5);
+    cursor: pointer;
+}
+.marker-basestation.status-offline { background: #6b7280; }
+.marker-basestation.status-degraded { background: #f59e0b; }
+.marker-cabinet {
+    width: 18px; height: 18px;
+    background: #8b5cf6;
+    border: 2px solid #fff;
+    border-radius: 2px;
+    box-shadow: 0 2px 8px rgba(139,92,246,0.5);
+    cursor: pointer;
+}
+.marker-cabinet.status-offline { background: #6b7280; }
+.marker-cabinet.door-open { border-color: #ef4444; box-shadow: 0 0 0 3px rgba(239,68,68,0.3); }
+
+/* ── Work Orders ─────────────────────────────────── */
+.wo-priority-urgent { color: #ef4444; font-weight: 700; }
+.wo-priority-high   { color: #f59e0b; font-weight: 600; }
+.wo-priority-medium { color: var(--text); }
+.wo-priority-low    { color: var(--text-dim); }
+
+/* ── Commissioning pipeline cards ───────────────── */
+.commission-step-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    text-align: center;
+}
+.commission-step-card .step-count {
+    font-size: 28px;
+    font-weight: 700;
+    margin: 8px 0 4px;
+}
+.commission-step-card .step-label { font-size: 12px; color: var(--text-dim); }

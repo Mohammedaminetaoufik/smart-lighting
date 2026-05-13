@@ -25,6 +25,11 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
         if (page === 'admin') { loadAdminSettings(); loadAdminUsers(); loadAccessLogs(); }
         if (page === 'interventions') { loadInterventions(); }
         if (page === 'profiles') { loadLightingProfiles(); }
+        if (page === 'basestations') { loadBasestations(); }
+        if (page === 'armoires') { loadCabinets(); }
+        if (page === 'controllers') { loadControllers(); }
+        if (page === 'workorders') { loadWorkOrders(); }
+        if (page === 'commissioning') { loadCommissioning(); }
 
         // Mettre à jour l'URL sans recharger la page
         const url = new URL(window.location);
@@ -960,4 +965,375 @@ function confirmPlacement(lat, lng) {
             window.location.reload();
         });
     }
+}
+
+// ── Generic modal helper ────────────────────────────────────────────
+function closeModal(id) { $(id).classList.add('hidden'); }
+
+// ── Leaflet layer groups ────────────────────────────────────────────
+let layerGroups = {};
+function getLayerGroup(name) {
+    if (!layerGroups[name]) layerGroups[name] = L.layerGroup().addTo(map);
+    return layerGroups[name];
+}
+function toggleLayer(name) {
+    const cb = document.getElementById('layer' + name.charAt(0).toUpperCase() + name.slice(1));
+    if (!layerGroups[name]) return;
+    if (cb && cb.checked) { map.addLayer(layerGroups[name]); }
+    else { map.removeLayer(layerGroups[name]); }
+}
+
+// ── Basestations ────────────────────────────────────────────────────
+let basestations = [];
+async function loadBasestations() {
+    const res = await fetch('/api/basestations');
+    basestations = await res.json() || [];
+    renderBasestationCards();
+    addBasestationMarkers();
+}
+
+function renderBasestationCards() {
+    const el = $('basestationList');
+    if (!el) return;
+    if (!basestations.length) { el.innerHTML = '<p style="color:var(--text-dim)">Aucune basestation enregistrée.</p>'; return; }
+    el.innerHTML = basestations.map(bs => `
+        <div class="panel" style="min-width:220px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                <strong>${esc(bs.reference)}</strong>
+                <span class="badge ${bs.status}">${bs.status}</span>
+            </div>
+            <div style="font-size:13px;color:var(--text-dim);">${esc(bs.name || '')} — ${esc(bs.zone || '')}</div>
+            <div style="font-size:12px;margin-top:6px;display:grid;grid-template-columns:1fr 1fr;gap:4px;">
+                <span>Réseau: <b>${esc(bs.network_type)}</b></span>
+                <span>Backhaul: <b>${esc(bs.primary_backhaul)}</b></span>
+                <span>Connectés: <b>${bs.connected_nodes_count}</b></span>
+                <span>Signal: <b>${bs.signal_quality_avg.toFixed(0)}%</b></span>
+            </div>
+            <div style="display:flex;gap:6px;margin-top:10px;">
+                <button class="btn btn-secondary btn-sm" onclick="simulateBasestationOffline(${bs.id})">📴 Sim. offline</button>
+            </div>
+        </div>`).join('');
+}
+
+function addBasestationMarkers() {
+    const lg = getLayerGroup('basestations');
+    lg.clearLayers();
+    basestations.forEach(bs => {
+        if (!bs.latitude || !bs.longitude) return;
+        const icon = L.divIcon({
+            className: `marker-basestation status-${bs.status}`,
+            iconSize: [20, 20], iconAnchor: [10, 10]
+        });
+        L.marker([bs.latitude, bs.longitude], {icon})
+            .bindPopup(`<b>📡 ${esc(bs.reference)}</b><br>${esc(bs.name||'')} — ${bs.status}<br>Réseau: ${bs.network_type}`)
+            .addTo(lg);
+    });
+}
+
+function openBasestationModal() { $('basestationModal').classList.remove('hidden'); }
+
+async function saveBasestation() {
+    const body = {
+        reference: $('bs_reference').value.trim(),
+        name: $('bs_name').value.trim(),
+        zone: $('bs_zone').value.trim(),
+        network_type: $('bs_network_type').value,
+        primary_backhaul: $('bs_backhaul').value,
+        address: $('bs_address').value.trim(),
+        latitude: $('bs_lat').value ? parseFloat($('bs_lat').value) : null,
+        longitude: $('bs_lng').value ? parseFloat($('bs_lng').value) : null,
+    };
+    if (!body.reference) { showToast('La référence est obligatoire', 'error'); return; }
+    const res = await fetch('/api/basestations', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+    if (res.ok) { closeModal('basestationModal'); showToast('Basestation créée', 'success'); loadBasestations(); }
+    else { const d = await res.json(); showToast(d.error || 'Erreur', 'error'); }
+}
+
+async function simulateBasestationOffline(id) {
+    if (!confirm('Simuler la basestation hors ligne ?')) return;
+    const res = await fetch(`/api/basestations/${id}/simulate-offline`, {method:'POST'});
+    if (res.ok) { showToast('Basestation mise offline', 'success'); loadBasestations(); }
+}
+
+// ── Cabinets ────────────────────────────────────────────────────────
+let cabinets = [];
+async function loadCabinets() {
+    const res = await fetch('/api/cabinets');
+    cabinets = await res.json() || [];
+    renderCabinetCards();
+    addCabinetMarkers();
+}
+
+function renderCabinetCards() {
+    const el = $('cabinetList');
+    if (!el) return;
+    if (!cabinets.length) { el.innerHTML = '<p style="color:var(--text-dim)">Aucune armoire enregistrée.</p>'; return; }
+    el.innerHTML = cabinets.map(cab => `
+        <div class="panel" style="min-width:220px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                <strong>${esc(cab.reference)}</strong>
+                <span class="badge ${cab.status}">${cab.status}</span>
+            </div>
+            <div style="font-size:13px;color:var(--text-dim);">${esc(cab.name||'')} — ${esc(cab.zone||'')}</div>
+            <div style="font-size:12px;margin-top:6px;display:grid;grid-template-columns:1fr 1fr;gap:4px;">
+                <span>Porte: <b class="${cab.door_status==='open'?'wo-priority-urgent':''}">${cab.door_status}</b></span>
+                <span>Alimentation: <b>${cab.power_status}</b></span>
+            </div>
+            <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;">
+                <button class="btn btn-secondary btn-sm" onclick="loadCabinetCircuits(${cab.id}, '${esc(cab.reference)}')">📋 Circuits</button>
+                <button class="btn btn-warning btn-sm" onclick="simulateDoorOpen(${cab.id})">🚪 Porte ouverte</button>
+                <button class="btn btn-danger btn-sm" onclick="simulatePowerFailure(${cab.id})">⚡ Panne alim.</button>
+            </div>
+        </div>`).join('');
+}
+
+function addCabinetMarkers() {
+    const lg = getLayerGroup('cabinets');
+    lg.clearLayers();
+    cabinets.forEach(cab => {
+        if (!cab.latitude || !cab.longitude) return;
+        const icon = L.divIcon({
+            className: `marker-cabinet status-${cab.status}${cab.door_status==='open'?' door-open':''}`,
+            iconSize: [18, 18], iconAnchor: [9, 9]
+        });
+        L.marker([cab.latitude, cab.longitude], {icon})
+            .bindPopup(`<b>🔌 ${esc(cab.reference)}</b><br>${esc(cab.name||'')} — ${cab.status}<br>Porte: ${cab.door_status}`)
+            .addTo(lg);
+    });
+}
+
+function openCabinetModal() { $('cabinetModal').classList.remove('hidden'); }
+
+async function saveCabinet() {
+    const body = {
+        reference: $('cab_reference').value.trim(),
+        name: $('cab_name').value.trim(),
+        zone: $('cab_zone').value.trim(),
+        address: $('cab_address').value.trim(),
+        notes: $('cab_notes').value.trim(),
+        latitude: $('cab_lat').value ? parseFloat($('cab_lat').value) : null,
+        longitude: $('cab_lng').value ? parseFloat($('cab_lng').value) : null,
+    };
+    if (!body.reference) { showToast('La référence est obligatoire', 'error'); return; }
+    const res = await fetch('/api/cabinets', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+    if (res.ok) { closeModal('cabinetModal'); showToast('Armoire créée', 'success'); loadCabinets(); }
+    else { const d = await res.json(); showToast(d.error || 'Erreur', 'error'); }
+}
+
+async function loadCabinetCircuits(id, ref) {
+    const res = await fetch(`/api/cabinets/${id}/circuits`);
+    const circuits = await res.json() || [];
+    const panel = $('cabinetCircuitsPanel');
+    $('cabinetCircuitsTitle').textContent = `Circuits — Armoire ${ref}`;
+    $('cabinetCircuitsList').innerHTML = circuits.length ? `
+        <table class="data-table"><thead><tr><th>Nom</th><th>Phase</th><th>Circuit</th><th>Statut</th><th>Contacteur</th><th>Disjoncteur</th><th>Courant</th></tr></thead>
+        <tbody>${circuits.map(cc => `<tr>
+            <td>${esc(cc.name)}</td><td>${cc.phase}</td><td>${cc.circuit_number}</td>
+            <td><span class="badge ${cc.status}">${cc.status}</span></td>
+            <td>${cc.contactor_status}</td><td>${cc.breaker_status}</td>
+            <td>${cc.measured_current ? cc.measured_current.toFixed(1)+' A' : '—'}</td>
+        </tr>`).join('')}</tbody></table>` : '<p style="color:var(--text-dim)">Aucun circuit.</p>';
+    panel.style.display = 'block';
+    panel.scrollIntoView({behavior:'smooth'});
+}
+
+function closeCabinetCircuits() { $('cabinetCircuitsPanel').style.display = 'none'; }
+
+async function simulateDoorOpen(id) {
+    const res = await fetch(`/api/cabinets/${id}/simulate-door-open`, {method:'POST'});
+    if (res.ok) { showToast('Porte ouverte simulée — alerte créée', 'success'); loadCabinets(); }
+}
+
+async function simulatePowerFailure(id) {
+    if (!confirm('Simuler une coupure alimentation ?')) return;
+    const res = await fetch(`/api/cabinets/${id}/simulate-power-failure`, {method:'POST'});
+    if (res.ok) { showToast('Panne alimentation simulée — alerte critique créée', 'success'); loadCabinets(); }
+}
+
+// ── Controllers ─────────────────────────────────────────────────────
+async function loadControllers() {
+    const res = await fetch('/api/controllers');
+    const controllers = await res.json() || [];
+    const tbody = $('controllerList');
+    if (!tbody) return;
+    if (!controllers.length) { tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-dim);">Aucun contrôleur.</td></tr>'; return; }
+    tbody.innerHTML = controllers.map(ctrl => `<tr>
+        <td style="font-family:monospace;font-size:12px;">${esc(ctrl.controller_uid)}</td>
+        <td>${esc(ctrl.type)}</td>
+        <td>${ctrl.basestation_id ? '#'+ctrl.basestation_id : '—'}</td>
+        <td>${ctrl.lampadaire_id ? '#'+ctrl.lampadaire_id : '—'}</td>
+        <td><span class="badge ${ctrl.communication_status==='ok'?'online':ctrl.communication_status==='lost'?'offline':'maintenance'}">${ctrl.communication_status}</span></td>
+        <td>${ctrl.signal_quality}%</td>
+        <td><span class="badge ${ctrl.installation_status==='commissioned'?'online':ctrl.installation_status==='associated'?'maintenance':'unknown'}">${ctrl.installation_status}</span></td>
+        <td>
+            <button class="btn btn-secondary btn-sm" onclick="associateControllerModal(${ctrl.id})">🔗 Associer</button>
+        </td>
+    </tr>`).join('');
+}
+
+function openControllerModal() { $('controllerModal').classList.remove('hidden'); }
+
+async function saveController() {
+    const body = {
+        controller_uid: $('ctrl_uid').value.trim(),
+        serial_number: $('ctrl_serial').value.trim(),
+        type: $('ctrl_type').value,
+        firmware_version: $('ctrl_firmware').value.trim(),
+        metering_enabled: true, dimming_enabled: true,
+    };
+    if (!body.controller_uid) { showToast('L\'UID est obligatoire', 'error'); return; }
+    const res = await fetch('/api/controllers', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+    if (res.ok) { closeModal('controllerModal'); showToast('Contrôleur créé', 'success'); loadControllers(); }
+    else { const d = await res.json(); showToast(d.error || 'Erreur', 'error'); }
+}
+
+async function associateControllerModal(ctrlId) {
+    const lampId = prompt('ID du lampadaire à associer :');
+    if (!lampId || isNaN(parseInt(lampId))) return;
+    const res = await fetch(`/api/controllers/${ctrlId}/associate`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({lampadaire_id: parseInt(lampId)})
+    });
+    if (res.ok) { showToast('Association réussie', 'success'); loadControllers(); }
+    else { const d = await res.json(); showToast(d.error || 'Erreur', 'error'); }
+}
+
+// ── Work Orders ─────────────────────────────────────────────────────
+async function loadWorkOrders() {
+    const status = ($('woFilterStatus') || {}).value || '';
+    const priority = ($('woFilterPriority') || {}).value || '';
+    let url = '/api/workorders';
+    const res = await fetch(url);
+    let workOrders = await res.json() || [];
+    if (status) workOrders = workOrders.filter(w => w.status === status);
+    if (priority) workOrders = workOrders.filter(w => w.priority === priority);
+    const tbody = $('workOrderList');
+    if (!tbody) return;
+    if (!workOrders.length) { tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-dim);">Aucun work order.</td></tr>'; return; }
+    tbody.innerHTML = workOrders.map(wo => `<tr>
+        <td>#${wo.id}</td>
+        <td style="max-width:200px;">${esc(wo.title)}</td>
+        <td><span class="wo-priority-${wo.priority}">${wo.priority.toUpperCase()}</span></td>
+        <td><span class="badge ${woStatusClass(wo.status)}">${wo.status}</span></td>
+        <td>${wo.crew_type}</td>
+        <td>${wo.assigned_to ? '#'+wo.assigned_to : '—'}</td>
+        <td style="font-size:12px;color:var(--text-dim);">${fmt(wo.created_at)}</td>
+        <td style="display:flex;gap:4px;flex-wrap:wrap;">
+            ${wo.status==='created'||wo.status==='assigned' ? `<button class="btn btn-secondary btn-sm" onclick="startWorkOrder(${wo.id})">▶ Démarrer</button>` : ''}
+            ${wo.status==='in_progress' ? `<button class="btn btn-primary btn-sm" onclick="resolveWorkOrder(${wo.id})">✓ Résoudre</button>` : ''}
+            ${wo.status==='resolved' ? `<button class="btn btn-secondary btn-sm" onclick="closeWorkOrder(${wo.id})">✕ Clôturer</button>` : ''}
+        </td>
+    </tr>`).join('');
+}
+
+function woStatusClass(s) {
+    return {created:'unknown',assigned:'maintenance',in_progress:'warning',resolved:'online',closed:'applied',cancelled:'offline'}[s] || 'unknown';
+}
+
+function openWorkOrderModal(alertIds) {
+    $('wo_alert_ids').value = JSON.stringify(alertIds || []);
+    $('wo_title').value = '';
+    $('wo_description').value = '';
+    $('wo_cause').value = '';
+    $('wo_alerts_info').textContent = alertIds && alertIds.length ? `Lié à ${alertIds.length} alerte(s): ${alertIds.join(', ')}` : '';
+    $('workOrderModal').classList.remove('hidden');
+}
+
+async function saveWorkOrder() {
+    const alertIds = JSON.parse($('wo_alert_ids').value || '[]');
+    const body = {
+        title: $('wo_title').value.trim(),
+        description: $('wo_description').value.trim(),
+        priority: $('wo_priority').value,
+        crew_type: $('wo_crew_type').value,
+        probable_cause: $('wo_cause').value.trim(),
+        source_alert_ids: alertIds,
+    };
+    if (!body.title) { showToast('Le titre est obligatoire', 'error'); return; }
+    const url = alertIds.length ? '/api/workorders/from-alerts' : '/api/workorders';
+    const apiBody = alertIds.length ? {alert_ids: alertIds, title: body.title, priority: body.priority, crew_type: body.crew_type} : body;
+    const res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(apiBody)});
+    if (res.ok) { closeModal('workOrderModal'); showToast('Work order créé', 'success'); loadWorkOrders(); }
+    else { const d = await res.json(); showToast(d.error || 'Erreur', 'error'); }
+}
+
+async function startWorkOrder(id) {
+    const res = await fetch(`/api/workorders/${id}/start`, {method:'POST'});
+    if (res.ok) { showToast('Work order démarré', 'success'); loadWorkOrders(); }
+}
+
+async function resolveWorkOrder(id) {
+    const note = prompt('Note de résolution :') || '';
+    const res = await fetch(`/api/workorders/${id}/resolve`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({note})});
+    if (res.ok) { showToast('Work order résolu', 'success'); loadWorkOrders(); }
+}
+
+async function closeWorkOrder(id) {
+    const res = await fetch(`/api/workorders/${id}/close`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({note:''})});
+    if (res.ok) { showToast('Work order clôturé', 'success'); loadWorkOrders(); }
+}
+
+// ── Commissioning ───────────────────────────────────────────────────
+async function loadCommissioning() {
+    const res = await fetch('/api/lampadaires/missing-location');
+    const all = await fetch('/api/lampadaires/' + (window.LAMPADAIRES && window.LAMPADAIRES.length ? '' : ''));
+    // Use window.LAMPADAIRES for commissioning pipeline
+    const lamps = window.LAMPADAIRES || [];
+    renderCommissioningPipeline(lamps);
+    renderCommissioningTable(lamps);
+}
+
+function renderCommissioningPipeline(lamps) {
+    const el = $('commissioningPipeline');
+    if (!el) return;
+    const steps = ['discovered','located','configured','tested','commissioned','failed'];
+    const labels = ['Découvert','Localisé','Configuré','Testé','Commissioning','Échec'];
+    const colors = ['#3b82f6','#8b5cf6','#f59e0b','#06b6d4','#22c55e','#ef4444'];
+    el.innerHTML = steps.map((s, i) => {
+        const count = lamps.filter(l => l.commissioning_status === s).length;
+        return `<div class="commission-step-card">
+            <div style="font-size:11px;font-weight:600;color:${colors[i]};text-transform:uppercase;">${labels[i]}</div>
+            <div class="step-count" style="color:${colors[i]};">${count}</div>
+            <div class="step-label">${s}</div>
+        </div>`;
+    }).join('');
+}
+
+function renderCommissioningTable(lamps) {
+    const tbody = $('commissioningList');
+    if (!tbody) return;
+    const filtered = lamps.filter(l => l.commissioning_status !== 'commissioned');
+    if (!filtered.length) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--accent);">Tous les lampadaires sont commissionnés !</td></tr>'; return; }
+    tbody.innerHTML = filtered.map(l => `<tr>
+        <td>${esc(l.reference)}</td>
+        <td>${esc(l.zone||'')}</td>
+        <td>${l.commissioning_step || 0}</td>
+        <td><span class="badge ${l.commissioning_status==='commissioned'?'online':l.commissioning_status==='failed'?'offline':'maintenance'}">${l.commissioning_status}</span></td>
+        <td>${l.test_comm_status||'pending'}</td>
+        <td>${l.test_dimming_status||'pending'}</td>
+        <td style="display:flex;gap:4px;flex-wrap:wrap;">
+            <button class="btn btn-secondary btn-sm" onclick="advanceCommissioning(${l.id})">→ Avancer</button>
+            <button class="btn btn-primary btn-sm" onclick="validateCommissioning(${l.id})">✓ Valider</button>
+            <button class="btn btn-danger btn-sm" onclick="failCommissioning(${l.id})">✕ Échec</button>
+        </td>
+    </tr>`).join('');
+}
+
+async function advanceCommissioning(id) {
+    const res = await fetch(`/api/commissioning/${id}/advance`, {method:'POST'});
+    const d = await res.json();
+    if (res.ok) { showToast(`Étape ${d.step}: ${d.status}`, 'success'); window.location.reload(); }
+    else showToast(d.error || 'Erreur', 'error');
+}
+
+async function validateCommissioning(id) {
+    if (!confirm('Valider le commissioning complet de ce lampadaire ?')) return;
+    const res = await fetch(`/api/commissioning/${id}/validate`, {method:'POST'});
+    if (res.ok) { showToast('Commissioning validé !', 'success'); window.location.reload(); }
+}
+
+async function failCommissioning(id) {
+    const notes = prompt('Motif de l\'échec :') || '';
+    const res = await fetch(`/api/commissioning/${id}/fail`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({notes})});
+    if (res.ok) { showToast('Marqué en échec', 'success'); window.location.reload(); }
 }

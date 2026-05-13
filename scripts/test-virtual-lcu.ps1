@@ -298,4 +298,144 @@ if ($energy) {
     Log-Success "Energie: economies=$($energy.estimated_saving_percent)%"
 }
 
+# -----------------------------------------------------------------------
+Log-Step "14. Tester Basestation"
+$bsPayload = @{
+    reference        = "BS-TEST-001"
+    name             = "Basestation Test Medina"
+    zone             = "Zone A (Medina)"
+    network_type     = "ZigBee"
+    primary_backhaul = "simulated"
+}
+$bs = Call-API "POST" "/api/basestations" $bsPayload
+if ($bs -and $bs.id -gt 0) {
+    Log-Success "Basestation creee: ID=$($bs.id)"
+    $bsList = Call-API "GET" "/api/basestations"
+    if ($bsList.Count -gt 0) { Log-Success "Liste basestations: $($bsList.Count) entrees" }
+    $bsGet = Call-API "GET" "/api/basestations/$($bs.id)"
+    if ($bsGet -and $bsGet.reference -eq "BS-TEST-001") { Log-Success "GET basestation OK" }
+    $simOffline = Call-API "POST" "/api/basestations/$($bs.id)/simulate-offline" $null
+    if ($simOffline) { Log-Success "Simulation offline basestation OK" }
+} else {
+    Log-Error "Echec creation basestation"
+}
+
+# -----------------------------------------------------------------------
+Log-Step "15. Tester Cabinet (Armoire)"
+$cabPayload = @{
+    reference = "CAB-TEST-001"
+    name      = "Armoire Test Medina"
+    zone      = "Zone A (Medina)"
+}
+$cab = Call-API "POST" "/api/cabinets" $cabPayload
+if ($cab -and $cab.id -gt 0) {
+    Log-Success "Cabinet cree: ID=$($cab.id)"
+    $cabList = Call-API "GET" "/api/cabinets"
+    if ($cabList.Count -gt 0) { Log-Success "Liste cabinets: $($cabList.Count) entrees" }
+    $circPayload = @{
+        name           = "Circuit L1"
+        phase          = "L1"
+        circuit_number = 1
+        lamp_count     = 10
+    }
+    $circ = Call-API "POST" "/api/cabinets/$($cab.id)/circuits" $circPayload
+    if ($circ -and $circ.id -gt 0) { Log-Success "Circuit cree: ID=$($circ.id)" }
+    $circList = Call-API "GET" "/api/cabinets/$($cab.id)/circuits"
+    if ($circList.Count -gt 0) { Log-Success "Liste circuits: $($circList.Count) entrees" }
+    $simDoor = Call-API "POST" "/api/cabinets/$($cab.id)/simulate-door-open" $null
+    if ($simDoor) { Log-Success "Simulation porte ouverte OK" }
+    $simPower = Call-API "POST" "/api/cabinets/$($cab.id)/simulate-power-failure" $null
+    if ($simPower) { Log-Success "Simulation panne alimentation OK" }
+} else {
+    Log-Error "Echec creation cabinet"
+}
+
+# -----------------------------------------------------------------------
+Log-Step "16. Tester Controller"
+$ctrlPayload = @{
+    controller_uid = "CTRL-TEST-001"
+    serial_number  = "SN-TEST-001"
+    type           = "Simulated"
+}
+if ($bs -and $bs.id -gt 0) { $ctrlPayload.basestation_id = $bs.id }
+$ctrl = Call-API "POST" "/api/controllers" $ctrlPayload
+if ($ctrl -and $ctrl.id -gt 0) {
+    Log-Success "Controller cree: ID=$($ctrl.id)"
+    $ctrlList = Call-API "GET" "/api/controllers"
+    if ($ctrlList.Count -gt 0) { Log-Success "Liste controllers: $($ctrlList.Count) entrees" }
+    if ($onlineLamps -and $onlineLamps.Count -gt 0) {
+        $assocPayload = @{ lampadaire_id = $onlineLamps[0].id }
+        $assoc = Call-API "POST" "/api/controllers/$($ctrl.id)/associate" $assocPayload
+        if ($assoc) { Log-Success "Association controller->lampadaire OK" }
+    }
+} else {
+    Log-Error "Echec creation controller"
+}
+
+# -----------------------------------------------------------------------
+Log-Step "17. Tester Work Orders"
+$woPayload = @{
+    title       = "Work Order Test — Panne lampadaire"
+    description = "Intervention suite a alerte temperature"
+    priority    = "high"
+    crew_type   = "lighting"
+}
+if ($onlineLamps -and $onlineLamps.Count -gt 0) { $woPayload.lampadaire_id = $onlineLamps[0].id }
+$wo = Call-API "POST" "/api/workorders" $woPayload
+if ($wo -and $wo.id -gt 0) {
+    Log-Success "Work order cree: ID=$($wo.id)"
+    $woList = Call-API "GET" "/api/workorders"
+    if ($woList.Count -gt 0) { Log-Success "Liste work orders: $($woList.Count) entrees" }
+    $woStart = Call-API "POST" "/api/workorders/$($wo.id)/start" $null
+    if ($woStart) { Log-Success "Work order demarre" }
+    $resolvePayload = @{ resolution_note = "Probleme resolu lors du test" }
+    $woResolve = Call-API "POST" "/api/workorders/$($wo.id)/resolve" $resolvePayload
+    if ($woResolve) { Log-Success "Work order resolu" }
+    $woClose = Call-API "POST" "/api/workorders/$($wo.id)/close" $null
+    if ($woClose) { Log-Success "Work order cloture" }
+} else {
+    Log-Error "Echec creation work order"
+}
+
+# Test from-alerts
+if ($targetAlertId) {
+    $fromAlerts = Call-API "POST" "/api/workorders/from-alerts" @{ alert_ids = @($targetAlertId); crew_type = "electrical" }
+    if ($fromAlerts -and $fromAlerts.id -gt 0) {
+        Log-Success "Work order cree depuis alertes: ID=$($fromAlerts.id)"
+    }
+}
+
+# -----------------------------------------------------------------------
+Log-Step "18. Verifier Dashboard enrichi (nouvelles entites)"
+$dashV2 = Call-API "GET" "/api/dashboard/stats"
+if ($dashV2) {
+    if ($null -ne $dashV2.total_basestations) {
+        Log-Success "Dashboard total_basestations=$($dashV2.total_basestations)"
+    } else {
+        Log-Error "Dashboard manque total_basestations"
+    }
+    if ($null -ne $dashV2.total_cabinets) {
+        Log-Success "Dashboard total_cabinets=$($dashV2.total_cabinets)"
+    } else {
+        Log-Error "Dashboard manque total_cabinets"
+    }
+    if ($null -ne $dashV2.open_work_orders) {
+        Log-Success "Dashboard open_work_orders=$($dashV2.open_work_orders)"
+    } else {
+        Log-Error "Dashboard manque open_work_orders"
+    }
+    if ($null -ne $dashV2.commissioning_rate) {
+        Log-Success "Dashboard commissioning_rate=$($dashV2.commissioning_rate)%"
+    } else {
+        Log-Error "Dashboard manque commissioning_rate"
+    }
+}
+
+# Test network-health et commissioning-progress
+$netHealth = Call-API "GET" "/api/dashboard/network-health"
+if ($netHealth) { Log-Success "Network health OK: basestations=$($netHealth.basestations.total)" }
+
+$commProgress = Call-API "GET" "/api/dashboard/commissioning-progress"
+if ($commProgress) { Log-Success "Commissioning progress OK: total=$($commProgress.total)" }
+
 Write-Host "`n=== TESTS TERMINES ===" -ForegroundColor Green

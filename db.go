@@ -394,6 +394,173 @@ func ensureSchema(db *sql.DB) error {
 			END IF;
 		END $$;
 	`)
+	if err != nil {
+		return err
+	}
+	return ensureSchemaV2(db)
+}
+
+func ensureSchemaV2(db *sql.DB) error {
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS basestations (
+			id SERIAL PRIMARY KEY,
+			reference VARCHAR(100) UNIQUE NOT NULL,
+			name VARCHAR(200),
+			latitude DOUBLE PRECISION,
+			longitude DOUBLE PRECISION,
+			zone VARCHAR(100),
+			address TEXT,
+			status VARCHAR(50) NOT NULL DEFAULT 'unknown',
+			network_type VARCHAR(50) NOT NULL DEFAULT 'Simulated',
+			primary_backhaul VARCHAR(50) NOT NULL DEFAULT 'simulated',
+			active_backhaul VARCHAR(50),
+			connected_nodes_count INT NOT NULL DEFAULT 0,
+			disconnected_nodes_count INT NOT NULL DEFAULT 0,
+			signal_quality_avg DOUBLE PRECISION NOT NULL DEFAULT 0,
+			battery_status VARCHAR(50) NOT NULL DEFAULT 'unknown',
+			last_seen_at TIMESTAMP WITH TIME ZONE,
+			commissioned_at TIMESTAMP WITH TIME ZONE,
+			created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+		);
+
+		CREATE TABLE IF NOT EXISTS cabinets (
+			id SERIAL PRIMARY KEY,
+			reference VARCHAR(100) UNIQUE NOT NULL,
+			name VARCHAR(200),
+			latitude DOUBLE PRECISION,
+			longitude DOUBLE PRECISION,
+			zone VARCHAR(100),
+			address TEXT,
+			status VARCHAR(50) NOT NULL DEFAULT 'unknown',
+			door_status VARCHAR(50) NOT NULL DEFAULT 'unknown',
+			power_status VARCHAR(50) NOT NULL DEFAULT 'normal',
+			voltage_l1 DOUBLE PRECISION,
+			voltage_l2 DOUBLE PRECISION,
+			voltage_l3 DOUBLE PRECISION,
+			current_l1 DOUBLE PRECISION,
+			current_l2 DOUBLE PRECISION,
+			current_l3 DOUBLE PRECISION,
+			leakage_current DOUBLE PRECISION,
+			energy_kwh DOUBLE PRECISION NOT NULL DEFAULT 0,
+			last_seen_at TIMESTAMP WITH TIME ZONE,
+			notes TEXT,
+			created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+		);
+
+		CREATE TABLE IF NOT EXISTS cabinet_circuits (
+			id SERIAL PRIMARY KEY,
+			cabinet_id INT NOT NULL REFERENCES cabinets(id) ON DELETE CASCADE,
+			name VARCHAR(100) NOT NULL,
+			phase VARCHAR(10) NOT NULL DEFAULT 'L1',
+			circuit_number INT NOT NULL DEFAULT 1,
+			status VARCHAR(50) NOT NULL DEFAULT 'active',
+			contactor_status VARCHAR(50) NOT NULL DEFAULT 'unknown',
+			breaker_status VARCHAR(50) NOT NULL DEFAULT 'ok',
+			measured_current DOUBLE PRECISION,
+			measured_voltage DOUBLE PRECISION,
+			measured_power DOUBLE PRECISION,
+			lamp_count INT NOT NULL DEFAULT 0,
+			profile_id INT REFERENCES lighting_profiles(id) ON DELETE SET NULL,
+			last_fault_at TIMESTAMP WITH TIME ZONE,
+			created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+		);
+
+		CREATE TABLE IF NOT EXISTS controllers (
+			id SERIAL PRIMARY KEY,
+			controller_uid VARCHAR(200) UNIQUE NOT NULL,
+			serial_number VARCHAR(100),
+			type VARCHAR(50) NOT NULL DEFAULT 'Simulated',
+			lampadaire_id INT REFERENCES lampadaires(id) ON DELETE SET NULL,
+			basestation_id INT REFERENCES basestations(id) ON DELETE SET NULL,
+			cabinet_id INT REFERENCES cabinets(id) ON DELETE SET NULL,
+			firmware_version VARCHAR(50),
+			communication_status VARCHAR(50) NOT NULL DEFAULT 'ok',
+			signal_quality INT NOT NULL DEFAULT 0,
+			last_seen_at TIMESTAMP WITH TIME ZONE,
+			metering_enabled BOOLEAN NOT NULL DEFAULT true,
+			dimming_enabled BOOLEAN NOT NULL DEFAULT true,
+			installation_status VARCHAR(50) NOT NULL DEFAULT 'discovered',
+			created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+		);
+
+		CREATE TABLE IF NOT EXISTS work_orders (
+			id SERIAL PRIMARY KEY,
+			title VARCHAR(300) NOT NULL,
+			description TEXT,
+			priority VARCHAR(50) NOT NULL DEFAULT 'medium',
+			status VARCHAR(50) NOT NULL DEFAULT 'created',
+			lampadaire_id INT REFERENCES lampadaires(id) ON DELETE SET NULL,
+			cabinet_id INT REFERENCES cabinets(id) ON DELETE SET NULL,
+			basestation_id INT REFERENCES basestations(id) ON DELETE SET NULL,
+			circuit_id INT REFERENCES cabinet_circuits(id) ON DELETE SET NULL,
+			assigned_to INT REFERENCES users(id) ON DELETE SET NULL,
+			crew_type VARCHAR(50) NOT NULL DEFAULT 'lighting',
+			due_date TIMESTAMP WITH TIME ZONE,
+			probable_cause TEXT,
+			resolution_note TEXT,
+			created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+			closed_at TIMESTAMP WITH TIME ZONE
+		);
+
+		CREATE TABLE IF NOT EXISTS work_order_alerts (
+			work_order_id INT NOT NULL REFERENCES work_orders(id) ON DELETE CASCADE,
+			alert_id INT NOT NULL REFERENCES alerts(id) ON DELETE CASCADE,
+			PRIMARY KEY (work_order_id, alert_id)
+		);
+
+		-- Alerts extended columns
+		ALTER TABLE alerts ADD COLUMN IF NOT EXISTS source_type VARCHAR(50) NOT NULL DEFAULT 'lampadaire';
+		ALTER TABLE alerts ADD COLUMN IF NOT EXISTS cabinet_id INT REFERENCES cabinets(id) ON DELETE SET NULL;
+		ALTER TABLE alerts ADD COLUMN IF NOT EXISTS basestation_id INT REFERENCES basestations(id) ON DELETE SET NULL;
+		ALTER TABLE alerts ADD COLUMN IF NOT EXISTS circuit_id INT REFERENCES cabinet_circuits(id) ON DELETE SET NULL;
+		ALTER TABLE alerts ADD COLUMN IF NOT EXISTS acknowledged_at TIMESTAMP WITH TIME ZONE;
+		ALTER TABLE alerts ADD COLUMN IF NOT EXISTS closed_at TIMESTAMP WITH TIME ZONE;
+		ALTER TABLE alerts ADD COLUMN IF NOT EXISTS probable_cause TEXT;
+		ALTER TABLE alerts ADD COLUMN IF NOT EXISTS recommended_action TEXT;
+
+		-- Alerts: extend severity and status constraints to include new values
+		ALTER TABLE alerts DROP CONSTRAINT IF EXISTS check_alert_severity;
+		ALTER TABLE alerts ADD CONSTRAINT check_alert_severity CHECK (severity IN ('info', 'warning', 'major', 'critical'));
+		ALTER TABLE alerts DROP CONSTRAINT IF EXISTS check_alert_status;
+		ALTER TABLE alerts ADD CONSTRAINT check_alert_status CHECK (status IN ('open', 'acknowledged', 'in_progress', 'resolved', 'closed'));
+
+		-- Commissioning workflow columns on lampadaires
+		ALTER TABLE lampadaires ADD COLUMN IF NOT EXISTS commissioning_step INT NOT NULL DEFAULT 0;
+		ALTER TABLE lampadaires ADD COLUMN IF NOT EXISTS commissioned_at TIMESTAMP WITH TIME ZONE;
+		ALTER TABLE lampadaires ADD COLUMN IF NOT EXISTS commissioned_by INT REFERENCES users(id) ON DELETE SET NULL;
+		ALTER TABLE lampadaires ADD COLUMN IF NOT EXISTS test_comm_status VARCHAR(50) NOT NULL DEFAULT 'pending';
+		ALTER TABLE lampadaires ADD COLUMN IF NOT EXISTS test_dimming_status VARCHAR(50) NOT NULL DEFAULT 'pending';
+		ALTER TABLE lampadaires ADD COLUMN IF NOT EXISTS test_metering_status VARCHAR(50) NOT NULL DEFAULT 'pending';
+		ALTER TABLE lampadaires ADD COLUMN IF NOT EXISTS commissioning_notes TEXT;
+
+		-- Extend commissioning_status to include 'failed'
+		ALTER TABLE lampadaires DROP CONSTRAINT IF EXISTS chk_commissioning_status;
+		DO $$
+		BEGIN
+			IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_commissioning_status_v2') THEN
+				ALTER TABLE lampadaires ADD CONSTRAINT chk_commissioning_status_v2
+					CHECK (commissioning_status IN ('discovered', 'located', 'configured', 'tested', 'commissioned', 'failed'));
+			END IF;
+		END $$;
+
+		-- Indexes
+		CREATE INDEX IF NOT EXISTS idx_basestations_status ON basestations(status);
+		CREATE INDEX IF NOT EXISTS idx_basestations_zone ON basestations(zone);
+		CREATE INDEX IF NOT EXISTS idx_cabinets_status ON cabinets(status);
+		CREATE INDEX IF NOT EXISTS idx_cabinets_zone ON cabinets(zone);
+		CREATE INDEX IF NOT EXISTS idx_controllers_lampadaire ON controllers(lampadaire_id);
+		CREATE INDEX IF NOT EXISTS idx_controllers_basestation ON controllers(basestation_id);
+		CREATE INDEX IF NOT EXISTS idx_work_orders_status ON work_orders(status);
+		CREATE INDEX IF NOT EXISTS idx_work_orders_priority ON work_orders(priority);
+		CREATE INDEX IF NOT EXISTS idx_alerts_source_type ON alerts(source_type);
+		CREATE INDEX IF NOT EXISTS idx_alerts_severity ON alerts(severity);
+		CREATE INDEX IF NOT EXISTS idx_alerts_status ON alerts(status);
+	`)
 	return err
 }
 

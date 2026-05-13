@@ -129,17 +129,25 @@ type DimmingCommand struct {
 	AppliedAt    *time.Time `json:"applied_at,omitempty"`
 }
 
-// Alert represents a system alert related to a lampadaire.
+// Alert represents a system alert related to a lampadaire, cabinet, basestation or circuit.
 type Alert struct {
-	ID           int        `json:"id"`
-	LampadaireID *int       `json:"lampadaire_id,omitempty"`
-	Type         string     `json:"type"`
-	Severity     string     `json:"severity"`
-	Message      string     `json:"message"`
-	Status       string     `json:"status"`
-	CreatedAt    time.Time  `json:"created_at"`
-	ResolvedAt   *time.Time `json:"resolved_at,omitempty"`
-	Reference    string     `json:"reference,omitempty"`
+	ID                int        `json:"id"`
+	LampadaireID      *int       `json:"lampadaire_id,omitempty"`
+	CabinetID         *int       `json:"cabinet_id,omitempty"`
+	BasestationID     *int       `json:"basestation_id,omitempty"`
+	CircuitID         *int       `json:"circuit_id,omitempty"`
+	SourceType        string     `json:"source_type,omitempty"`
+	Type              string     `json:"type"`
+	Severity          string     `json:"severity"`
+	Message           string     `json:"message"`
+	Status            string     `json:"status"`
+	ProbableCause     string     `json:"probable_cause,omitempty"`
+	RecommendedAction string     `json:"recommended_action,omitempty"`
+	CreatedAt         time.Time  `json:"created_at"`
+	AcknowledgedAt    *time.Time `json:"acknowledged_at,omitempty"`
+	ResolvedAt        *time.Time `json:"resolved_at,omitempty"`
+	ClosedAt          *time.Time `json:"closed_at,omitempty"`
+	Reference         string     `json:"reference,omitempty"`
 }
 
 // CalculatorDecision represents an intelligent calculator recommendation.
@@ -213,9 +221,17 @@ type DashboardStats struct {
 	AvgPower               float64             `json:"avg_power"`
 	EstimatedPowerSavingW  float64             `json:"estimated_power_saving_w"`
 	EstimatedSavingPercent float64             `json:"estimated_saving_percent"`
-	RecentAlerts           []Alert             `json:"recent_alerts"`
-	RecentCommands         []DimmingCommand    `json:"recent_commands"`
-	RecentTelemetry        []SensorMeasurement `json:"recent_telemetry"`
+	// New entities
+	TotalBasestations       int `json:"total_basestations"`
+	BasestationsOnline      int `json:"basestations_online"`
+	TotalCabinets           int `json:"total_cabinets"`
+	TotalControllers        int `json:"total_controllers"`
+	OpenWorkOrders          int `json:"open_work_orders"`
+	UrgentWorkOrders        int `json:"urgent_work_orders"`
+	CommissioningRate       float64 `json:"commissioning_rate"`
+	RecentAlerts            []Alert             `json:"recent_alerts"`
+	RecentCommands          []DimmingCommand    `json:"recent_commands"`
+	RecentTelemetry         []SensorMeasurement `json:"recent_telemetry"`
 }
 
 type User struct {

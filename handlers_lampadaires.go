@@ -124,6 +124,7 @@ func handleGetDashboardStats(db *sql.DB) gin.HandlerFunc {
 			respondError(c, http.StatusInternalServerError, "Erreur lors du chargement des statistiques.")
 			return
 		}
+		enrichDashboardStats(c.Request.Context(), db, stats)
 		respondJSON(c, http.StatusOK, stats)
 	}
 }

@@ -124,6 +124,55 @@ func main() {
 		// Simulator API
 		api.POST("/simulator/telemetry/:id", handleSimulateTelemetry(db))
 		api.POST("/simulator/telemetry/all", handleSimulateAll(db))
+		api.GET("/simulator/scenarios", handleGetScenarios())
+		api.POST("/simulator/scenario", handleRunScenario(db))
+
+		// Basestations API
+		api.GET("/basestations", handleGetBasestations(db))
+		api.POST("/basestations", handleCreateBasestation(db))
+		api.GET("/basestations/:id", handleGetBasestation(db))
+		api.POST("/basestations/:id/simulate-offline", handleSimulateBasestationOffline(db))
+		api.GET("/basestations/:id/controllers", handleGetBasestationControllers(db))
+
+		// Cabinets API
+		api.GET("/cabinets", handleGetCabinets(db))
+		api.POST("/cabinets", handleCreateCabinet(db))
+		api.GET("/cabinets/:id", handleGetCabinet(db))
+		api.GET("/cabinets/:id/circuits", handleGetCabinetCircuits(db))
+		api.POST("/cabinets/:id/circuits", handleCreateCabinetCircuit(db))
+		api.POST("/cabinets/:id/simulate-door-open", handleSimulateCabinetDoorOpen(db))
+		api.POST("/cabinets/:id/simulate-power-failure", handleSimulatePowerFailure(db))
+
+		// Controllers API
+		api.GET("/controllers", handleGetControllers(db))
+		api.POST("/controllers", handleCreateController(db))
+		api.GET("/controllers/:id", handleGetController(db))
+		api.POST("/controllers/:id/associate", handleAssociateController(db))
+
+		// Work Orders API
+		api.GET("/workorders", handleGetWorkOrders(db))
+		api.POST("/workorders", handleCreateWorkOrder(db))
+		api.GET("/workorders/:id", handleGetWorkOrder(db))
+		api.POST("/workorders/from-alerts", handleCreateWorkOrderFromAlerts(db))
+		api.POST("/workorders/:id/assign", handleAssignWorkOrder(db))
+		api.POST("/workorders/:id/start", handleStartWorkOrder(db))
+		api.POST("/workorders/:id/resolve", handleResolveWorkOrder(db))
+		api.POST("/workorders/:id/close", handleCloseWorkOrder(db))
+
+		// Alerts extended
+		api.POST("/alerts/:id/ack", handleAckAlert(db))
+		api.POST("/alerts/:id/close", handleCloseAlert(db))
+
+		// Dashboard extended
+		api.GET("/dashboard/network-health", handleGetNetworkHealth(db))
+		api.GET("/dashboard/commissioning-progress", handleGetCommissioningProgress(db))
+
+		// Commissioning workflow
+		api.POST("/commissioning/:id/advance", handleAdvanceCommissioning(db))
+		api.POST("/commissioning/:id/test-comm", handleTestCommCommissioning(db))
+		api.POST("/commissioning/:id/test-dimming", handleTestDimmingCommissioning(db))
+		api.POST("/commissioning/:id/validate", handleValidateCommissioning(db))
+		api.POST("/commissioning/:id/fail", handleFailCommissioning(db))
 	}
 
 	port := os.Getenv("PORT")

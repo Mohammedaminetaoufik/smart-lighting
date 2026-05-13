@@ -16,20 +16,23 @@
         <button class="nav-btn" data-page="carte" type="button"><span class="nav-icon">🗺️</span> Carte</button>
         <div class="sidebar-section">Gestion du parc</div>
         <button class="nav-btn" data-page="lcu" type="button"><span class="nav-icon">🌐</span> LCU / Gateways</button>
+        <button class="nav-btn" data-page="basestations" type="button"><span class="nav-icon">📡</span> Basestations</button>
+        <button class="nav-btn" data-page="armoires" type="button"><span class="nav-icon">🔌</span> Armoires</button>
+        <button class="nav-btn" data-page="controllers" type="button"><span class="nav-icon">🔲</span> Contrôleurs</button>
         <button class="nav-btn" data-page="liste" type="button"><span class="nav-icon">📋</span> Lampadaires</button>
         <button class="nav-btn" data-page="localiser" type="button"><span class="nav-icon">📍</span> À localiser</button>
+        <button class="nav-btn" data-page="commissioning" type="button"><span class="nav-icon">✅</span> Commissioning</button>
         <div class="sidebar-section">Pilotage intelligent</div>
         <button class="nav-btn" data-page="calculateur" type="button"><span class="nav-icon">🧠</span> Décisions</button>
         <button class="nav-btn" data-page="dimming" type="button"><span class="nav-icon">💡</span> Dimming / Scénarios</button>
         <button class="nav-btn" data-page="profiles" type="button"><span class="nav-icon">🎛️</span> Profils d'éclairage</button>
         <div class="sidebar-section">Maintenance & Sécurité</div>
         <button class="nav-btn" data-page="alertes" type="button"><span class="nav-icon">🔔</span> Alertes</button>
-        <button class="nav-btn" data-page="interventions" type="button"><span class="nav-icon">🔧</span> Interventions</button>
+        <button class="nav-btn" data-page="workorders" type="button"><span class="nav-icon">🔧</span> Work Orders</button>
+        <button class="nav-btn" data-page="interventions" type="button"><span class="nav-icon">🛠️</span> Interventions</button>
         <div class="sidebar-section">Analyse & Admin</div>
         <button class="nav-btn" data-page="energie" type="button"><span class="nav-icon">⚡</span> Analyse énergétique</button>
         <button class="nav-btn" data-page="admin" type="button"><span class="nav-icon">⚙️</span> Administration</button>
-        
-        <!-- Outils de démo (garder en bas ou cacher) -->
         <button class="nav-btn" data-page="simulation" type="button" style="margin-top:auto;"><span class="nav-icon">🔬</span> Simulation IoT</button>
     </aside>
 
@@ -69,10 +72,25 @@
                 </div>
             </div>
 
-            <div style="display:flex; gap: 10px; margin-bottom: 16px;">
-                <button class="btn btn-primary btn-sm" onclick="setMapMode('add_lcu')">🌐 Ajouter LCU / Gateway</button>
-                <button class="btn btn-secondary btn-sm" onclick="setMapMode('add_lampadaire_manual')">💡 Ajouter lampadaire manuel</button>
-                <button class="btn btn-secondary btn-sm" onclick="setMapMode('view')">👁️ Mode consultation</button>
+            <div style="display:flex; gap: 10px; margin-bottom: 8px; flex-wrap:wrap;">
+                <button class="btn btn-primary btn-sm" onclick="setMapMode('add_lcu')">🌐 Ajouter LCU</button>
+                <button class="btn btn-secondary btn-sm" onclick="setMapMode('add_lampadaire_manual')">💡 Ajouter lampadaire</button>
+                <button class="btn btn-secondary btn-sm" onclick="setMapMode('view')">👁️ Consultation</button>
+            </div>
+            <div style="display:flex;gap:12px;margin-bottom:12px;flex-wrap:wrap;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);">
+                <span style="font-size:12px;color:var(--text-dim);font-weight:600;">LAYERS :</span>
+                <label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer;">
+                    <input type="checkbox" id="layerLampadaires" checked onchange="toggleLayer('lampadaires')"> Lampadaires
+                </label>
+                <label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer;">
+                    <input type="checkbox" id="layerBasestations" checked onchange="toggleLayer('basestations')"> Basestations
+                </label>
+                <label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer;">
+                    <input type="checkbox" id="layerCabinets" checked onchange="toggleLayer('cabinets')"> Armoires
+                </label>
+                <label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer;">
+                    <input type="checkbox" id="layerAlerts" onchange="toggleLayer('alerts')"> Alertes
+                </label>
             </div>
             <div class="map-layout">
                 <div id="map"></div>
@@ -378,6 +396,99 @@
         </div>
 
         <!-- ADMIN -->
+        <!-- BASESTATIONS -->
+        <div id="pageBasestations" class="page-view">
+            <h2 style="margin-bottom:16px;">Basestations / Gateways réseau</h2>
+            <div style="display:flex;gap:8px;margin-bottom:16px;">
+                <button class="btn btn-primary btn-sm" onclick="openBasestationModal()">➕ Ajouter basestation</button>
+            </div>
+            <div id="basestationList" class="stats-grid"></div>
+        </div>
+
+        <!-- ARMOIRES -->
+        <div id="pageArmoires" class="page-view">
+            <h2 style="margin-bottom:16px;">Armoires électriques</h2>
+            <div style="display:flex;gap:8px;margin-bottom:16px;">
+                <button class="btn btn-primary btn-sm" onclick="openCabinetModal()">➕ Ajouter armoire</button>
+            </div>
+            <div id="cabinetList" class="stats-grid"></div>
+            <!-- Circuits panel (shown when cabinet is selected) -->
+            <div id="cabinetCircuitsPanel" class="panel" style="margin-top:20px;display:none;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                    <h3 id="cabinetCircuitsTitle">Circuits</h3>
+                    <button class="btn btn-secondary btn-sm" onclick="closeCabinetCircuits()">✕ Fermer</button>
+                </div>
+                <div id="cabinetCircuitsList"></div>
+            </div>
+        </div>
+
+        <!-- CONTROLLEURS -->
+        <div id="pageControllers" class="page-view">
+            <h2 style="margin-bottom:16px;">Contrôleurs / Telecells</h2>
+            <div style="display:flex;gap:8px;margin-bottom:16px;">
+                <button class="btn btn-primary btn-sm" onclick="openControllerModal()">➕ Ajouter contrôleur</button>
+            </div>
+            <div class="panel table-wrap">
+                <table class="data-table">
+                    <thead><tr><th>UID</th><th>Type</th><th>Basestation</th><th>Lampadaire</th><th>Comm.</th><th>Signal</th><th>Statut</th><th>Actions</th></tr></thead>
+                    <tbody id="controllerList"><tr><td colspan="8" style="text-align:center;color:var(--text-dim);">Chargement...</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- WORK ORDERS -->
+        <div id="pageWorkorders" class="page-view">
+            <h2 style="margin-bottom:16px;">Work Orders</h2>
+            <div style="display:flex;gap:8px;margin-bottom:16px;">
+                <button class="btn btn-primary btn-sm" onclick="openWorkOrderModal([])">➕ Nouveau work order</button>
+                <select id="woFilterStatus" onchange="loadWorkOrders()" style="padding:6px 10px;background:var(--bg-input);border:1px solid var(--border);color:var(--text);border-radius:6px;">
+                    <option value="">Tous les statuts</option>
+                    <option value="created">Créé</option><option value="assigned">Assigné</option>
+                    <option value="in_progress">En cours</option><option value="resolved">Résolu</option>
+                    <option value="closed">Clôturé</option>
+                </select>
+                <select id="woFilterPriority" onchange="loadWorkOrders()" style="padding:6px 10px;background:var(--bg-input);border:1px solid var(--border);color:var(--text);border-radius:6px;">
+                    <option value="">Toutes priorités</option>
+                    <option value="urgent">Urgente</option><option value="high">Haute</option>
+                    <option value="medium">Moyenne</option><option value="low">Basse</option>
+                </select>
+            </div>
+            <div class="panel table-wrap">
+                <table class="data-table">
+                    <thead><tr><th>ID</th><th>Titre</th><th>Priorité</th><th>Statut</th><th>Type équipe</th><th>Assigné à</th><th>Créé le</th><th>Actions</th></tr></thead>
+                    <tbody id="workOrderList"><tr><td colspan="8" style="text-align:center;color:var(--text-dim);">Chargement...</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- COMMISSIONING -->
+        <div id="pageCommissioning" class="page-view">
+            <h2 style="margin-bottom:16px;">Commissioning — Mise en service</h2>
+            <div class="commission-pipeline-legend panel" style="margin-bottom:16px;">
+                <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                    <span style="color:var(--text-dim);font-size:13px;margin-right:4px;">Pipeline:</span>
+                    <span class="badge" style="background:#3b82f620;color:#3b82f6;">0 Découvert</span>
+                    <span style="color:var(--text-dim)">→</span>
+                    <span class="badge" style="background:#8b5cf620;color:#8b5cf6;">1 Localisé</span>
+                    <span style="color:var(--text-dim)">→</span>
+                    <span class="badge" style="background:#f59e0b20;color:#f59e0b;">2 Configuré</span>
+                    <span style="color:var(--text-dim)">→</span>
+                    <span class="badge" style="background:#06b6d420;color:#06b6d4;">3 Testé</span>
+                    <span style="color:var(--text-dim)">→</span>
+                    <span class="badge online">4 Commissioning</span>
+                    <span style="color:var(--text-dim)">|</span>
+                    <span class="badge critical">Échec</span>
+                </div>
+            </div>
+            <div id="commissioningPipeline" class="stats-grid"></div>
+            <div class="panel table-wrap" style="margin-top:16px;">
+                <table class="data-table">
+                    <thead><tr><th>Référence</th><th>Zone</th><th>Étape</th><th>Statut</th><th>Comm.</th><th>Dimming</th><th>Actions</th></tr></thead>
+                    <tbody id="commissioningList"><tr><td colspan="7" style="text-align:center;color:var(--text-dim);">Chargement...</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+
         <div id="pageAdmin" class="page-view">
             <h2 style="margin-bottom:16px;">Administration et accès</h2>
             <div style="display:grid;grid-template-columns:2fr 1fr;gap:20px;">
@@ -535,6 +646,117 @@
                 <button type="button" class="btn btn-secondary" onclick="$('interventionModal').classList.add('hidden')">Annuler</button>
             </div>
         </form>
+    </div>
+</div>
+
+<!-- MODAL BASESTATION -->
+<div id="basestationModal" class="modal-overlay hidden">
+    <div class="modal-box">
+        <h3>Ajouter une Basestation</h3>
+        <div class="field"><label>Référence *</label><input type="text" id="bs_reference" required></div>
+        <div class="field"><label>Nom</label><input type="text" id="bs_name"></div>
+        <div class="coords">
+            <div class="field"><label>Zone</label><input type="text" id="bs_zone"></div>
+            <div class="field"><label>Type réseau</label>
+                <select id="bs_network_type">
+                    <option value="Simulated">Simulated</option><option value="ZigBee">ZigBee</option>
+                    <option value="LoRaWAN">LoRaWAN</option><option value="WiSUN">WiSUN</option>
+                    <option value="UNB">UNB</option>
+                </select>
+            </div>
+        </div>
+        <div class="coords">
+            <div class="field"><label>Backhaul primaire</label>
+                <select id="bs_backhaul">
+                    <option value="simulated">Simulated</option><option value="cellular">Cellulaire</option>
+                    <option value="ethernet">Ethernet</option><option value="wifi">WiFi</option>
+                </select>
+            </div>
+            <div class="field"><label>Adresse</label><input type="text" id="bs_address"></div>
+        </div>
+        <div class="coords">
+            <div class="field"><label>Latitude</label><input type="number" id="bs_lat" step="any"></div>
+            <div class="field"><label>Longitude</label><input type="number" id="bs_lng" step="any"></div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:16px;">
+            <button class="btn btn-primary btn-block" onclick="saveBasestation()">Enregistrer</button>
+            <button class="btn btn-secondary" onclick="closeModal('basestationModal')">Annuler</button>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL CABINET -->
+<div id="cabinetModal" class="modal-overlay hidden">
+    <div class="modal-box">
+        <h3>Ajouter une Armoire</h3>
+        <div class="field"><label>Référence *</label><input type="text" id="cab_reference" required></div>
+        <div class="field"><label>Nom</label><input type="text" id="cab_name"></div>
+        <div class="coords">
+            <div class="field"><label>Zone</label><input type="text" id="cab_zone"></div>
+            <div class="field"><label>Adresse</label><input type="text" id="cab_address"></div>
+        </div>
+        <div class="coords">
+            <div class="field"><label>Latitude</label><input type="number" id="cab_lat" step="any"></div>
+            <div class="field"><label>Longitude</label><input type="number" id="cab_lng" step="any"></div>
+        </div>
+        <div class="field"><label>Notes</label><textarea id="cab_notes" rows="2"></textarea></div>
+        <div style="display:flex;gap:8px;margin-top:16px;">
+            <button class="btn btn-primary btn-block" onclick="saveCabinet()">Enregistrer</button>
+            <button class="btn btn-secondary" onclick="closeModal('cabinetModal')">Annuler</button>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL CONTROLLER -->
+<div id="controllerModal" class="modal-overlay hidden">
+    <div class="modal-box">
+        <h3>Ajouter un Contrôleur</h3>
+        <div class="field"><label>UID Contrôleur *</label><input type="text" id="ctrl_uid" required placeholder="CTRL-001-A1B2"></div>
+        <div class="field"><label>Numéro de série</label><input type="text" id="ctrl_serial"></div>
+        <div class="coords">
+            <div class="field"><label>Type</label>
+                <select id="ctrl_type">
+                    <option value="Simulated">Simulated</option><option value="NEMA">NEMA</option>
+                    <option value="Zhaga-D4i">Zhaga-D4i</option><option value="Conduit">Conduit</option>
+                    <option value="Internal">Internal</option>
+                </select>
+            </div>
+            <div class="field"><label>Firmware</label><input type="text" id="ctrl_firmware" placeholder="v2.1.0"></div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:16px;">
+            <button class="btn btn-primary btn-block" onclick="saveController()">Enregistrer</button>
+            <button class="btn btn-secondary" onclick="closeModal('controllerModal')">Annuler</button>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL WORK ORDER -->
+<div id="workOrderModal" class="modal-overlay hidden">
+    <div class="modal-box">
+        <h3>Nouveau Work Order</h3>
+        <input type="hidden" id="wo_alert_ids" value="">
+        <div class="field"><label>Titre *</label><input type="text" id="wo_title" required></div>
+        <div class="field"><label>Description</label><textarea id="wo_description" rows="2"></textarea></div>
+        <div class="coords">
+            <div class="field"><label>Priorité</label>
+                <select id="wo_priority">
+                    <option value="medium">Moyenne</option><option value="high">Haute</option>
+                    <option value="urgent">Urgente</option><option value="low">Basse</option>
+                </select>
+            </div>
+            <div class="field"><label>Type équipe</label>
+                <select id="wo_crew_type">
+                    <option value="lighting">Éclairage</option><option value="electrical">Électrique</option>
+                    <option value="network">Réseau</option><option value="inspection">Inspection</option>
+                </select>
+            </div>
+        </div>
+        <div class="field"><label>Cause probable</label><input type="text" id="wo_cause"></div>
+        <div id="wo_alerts_info" style="color:var(--text-dim);font-size:13px;margin-top:8px;"></div>
+        <div style="display:flex;gap:8px;margin-top:16px;">
+            <button class="btn btn-primary btn-block" onclick="saveWorkOrder()">Créer</button>
+            <button class="btn btn-secondary" onclick="closeModal('workOrderModal')">Annuler</button>
+        </div>
     </div>
 </div>
 
