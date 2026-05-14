@@ -23,9 +23,7 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
         if (page === 'localiser') { loadMissingLocation(); }
         if (page === 'energie') { loadEnergieStats(); }
         if (page === 'admin') { loadAdminSettings(); loadAdminUsers(); loadAccessLogs(); }
-        if (page === 'interventions') { loadInterventions(); }
         if (page === 'profiles') { loadLightingProfiles(); }
-        if (page === 'armoires') { loadCabinets(); }
         if (page === 'workorders') { loadWorkOrders(); }
         if (page === 'commissioning') { loadCommissioning(); }
 
@@ -454,7 +452,7 @@ function loadAlerts() {
             <td>${a.message}</td><td><span class="badge ${a.status}">${a.status}</span></td>
             <td>
                 ${a.status==='open'?`<button class="btn btn-primary btn-sm" onclick="resolveAlert(${a.id})">Résoudre</button>`:''}
-                ${a.status==='open'?`<button class="btn btn-secondary btn-sm" onclick="openInterventionModal(${a.id})">🔧 Intervention</button>`:''}
+                ${a.status==='open'?`<button class="btn btn-secondary btn-sm" onclick="createWorkOrderFromAlert(${a.id})">🔧 Work Order</button>`:''}
             </td>
         </tr>`).join('') || '<tr><td colspan="7">Aucune alerte</td></tr>';
     }).catch(e => showToast('Erreur chargement alertes: ' + e.message));
@@ -462,6 +460,22 @@ function loadAlerts() {
 
 function resolveAlert(id) {
     fetch(`/api/alerts/${id}/resolve`, {method:'POST'}).then(()=>{ loadAlerts(); loadAlertCounts(); });
+}
+
+function createWorkOrderFromAlert(alertId) {
+    const title = `Intervention alerte #${alertId}`;
+    fetch('/api/workorders/from-alerts', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ title, alert_ids: [alertId], priority: 'medium' })
+    }).then(r => r.json()).then(d => {
+        if (d.id) {
+            showToast(`Work Order #${d.id} créé`, 'success');
+            loadAlerts();
+        } else {
+            showToast(d.error || 'Erreur création Work Order', 'error');
+        }
+    }).catch(e => showToast('Erreur: ' + e.message, 'error'));
 }
 
 // --- Dimming ---
@@ -669,17 +683,17 @@ async function loadEnergieStats() {
         const res = await fetch('/api/energy/summary');
         if (res.ok) {
             const data = await res.json();
-            document.getElementById('energyNominal').innerText = data.total_nominal_power_w + ' W';
-            document.getElementById('energyCurrent').innerText = data.estimated_current_power_w + ' W';
-            document.getElementById('energySavingW').innerText = data.estimated_saving_w + ' W';
-            document.getElementById('energySavingPercent').innerText = data.estimated_saving_percent.toFixed(2) + ' %';
+            document.getElementById('energyNominal').innerText = ((data.total_nominal_power_w||0).toFixed(0)) + ' W';
+            document.getElementById('energyCurrent').innerText = ((data.estimated_current_power_w||0).toFixed(0)) + ' W';
+            document.getElementById('energySavingW').innerText = ((data.estimated_saving_w||0).toFixed(0)) + ' W';
+            document.getElementById('energySavingPercent').innerText = ((data.estimated_saving_percent||0).toFixed(2)) + ' %';
 
             let html = '';
             if (data.by_zone && data.by_zone.length > 0) {
                 data.by_zone.forEach(z => {
-                    html += '<tr><td>'+z.zone+'</td><td>'+z.lamp_count+'</td><td>'+z.nominal_power_w+' W</td><td>'+z.current_power_w+' W</td><td>'+z.saving_w+' W</td></tr>';
+                    html += `<tr><td>${esc(z.zone||'—')}</td><td>${(z.total_nominal_power_w||0).toFixed(0)} W</td><td>${(z.estimated_current_power_w||0).toFixed(0)} W</td><td>${(z.estimated_saving_w||0).toFixed(0)} W</td><td>${(z.estimated_saving_percent||0).toFixed(1)} %</td></tr>`;
                 });
-            } else { html = '<tr><td colspan="5" style="text-align:center;">Aucune donn�e par zone</td></tr>'; }
+            } else { html = '<tr><td colspan="5" style="text-align:center;">Aucune donnée par zone</td></tr>'; }
             document.getElementById('energyZoneList').innerHTML = html;
         }
     } catch (e) { console.error('Error loadEnergieStats', e); }

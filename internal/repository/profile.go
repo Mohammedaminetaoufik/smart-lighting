@@ -2,6 +2,7 @@ package repository
 
 import (
 	"database/sql"
+	"fmt"
 
 	"map-interactif/internal/models"
 )
@@ -59,6 +60,13 @@ func GetLightingProfileByID(db *sql.DB, id int) (*models.LightingProfile, error)
 
 // InsertLightingProfile inserts a lighting profile with its schedules.
 func InsertLightingProfile(db *sql.DB, p *models.LightingProfile) error {
+	var existingID int
+	err := db.QueryRow(`SELECT id FROM lighting_profiles WHERE name = $1 AND target_type = $2 AND target_value = $3`,
+		p.Name, p.TargetType, p.TargetValue).Scan(&existingID)
+	if err == nil {
+		return fmt.Errorf("DUPLICATE:%d", existingID)
+	}
+
 	tx, err := db.Begin()
 	if err != nil {
 		return err

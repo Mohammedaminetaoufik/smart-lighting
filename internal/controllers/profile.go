@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -34,6 +35,10 @@ func HandleCreateLightingProfile(db *sql.DB) gin.HandlerFunc {
 			return
 		}
 		if err := repository.InsertLightingProfile(db, &p); err != nil {
+			if strings.HasPrefix(err.Error(), "DUPLICATE:") {
+				RespondError(c, http.StatusConflict, "Ce profil existe déjà pour cette cible.")
+				return
+			}
 			RespondError(c, http.StatusInternalServerError, "Erreur lors de l'enregistrement")
 			return
 		}

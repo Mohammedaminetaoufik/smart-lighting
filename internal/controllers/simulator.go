@@ -55,6 +55,7 @@ func HandleSimulateTelemetry(db *sql.DB) gin.HandlerFunc {
 			newEtat = "online"
 		}
 		tx.ExecContext(c.Request.Context(), `UPDATE lampadaires SET last_seen_at=NOW(), etat=$1, updated_at=NOW() WHERE id=$2`, newEtat, id)
+		tx.ExecContext(c.Request.Context(), `UPDATE lampadaires SET controller_status='ok', controller_last_seen_at=NOW() WHERE id=$1`, id)
 
 		alerts := services.RunAlertRules(c.Request.Context(), tx, lamp, &m)
 
@@ -111,6 +112,7 @@ func HandleSimulateAll(db *sql.DB) gin.HandlerFunc {
 				newEtat = "online"
 			}
 			tx.ExecContext(c.Request.Context(), `UPDATE lampadaires SET last_seen_at=NOW(), etat=$1, updated_at=NOW() WHERE id=$2`, newEtat, id)
+			tx.ExecContext(c.Request.Context(), `UPDATE lampadaires SET controller_status='ok', controller_last_seen_at=NOW() WHERE id=$1`, id)
 			services.RunAlertRules(c.Request.Context(), tx, lamp, &m)
 			tx.Commit()
 		}
@@ -164,8 +166,10 @@ func HandleRunScenario(db *sql.DB) gin.HandlerFunc {
 		m.LampadaireID = body.LampadaireID
 		if body.Scenario == "communication_lost" {
 			tx.ExecContext(c.Request.Context(), `UPDATE lampadaires SET etat='offline', updated_at=NOW() WHERE id=$1`, body.LampadaireID)
+			tx.ExecContext(c.Request.Context(), `UPDATE lampadaires SET controller_status='lost', controller_last_seen_at=NOW() WHERE id=$1`, body.LampadaireID)
 		} else {
 			tx.ExecContext(c.Request.Context(), `UPDATE lampadaires SET last_seen_at=NOW(), etat='online', updated_at=NOW() WHERE id=$1`, body.LampadaireID)
+			tx.ExecContext(c.Request.Context(), `UPDATE lampadaires SET controller_status='ok', controller_last_seen_at=NOW() WHERE id=$1`, body.LampadaireID)
 		}
 		services.RunAlertRules(c.Request.Context(), tx, lamp, &m)
 		if err := tx.Commit(); err != nil {
