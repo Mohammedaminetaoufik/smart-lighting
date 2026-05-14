@@ -49,6 +49,16 @@ type LcuDeviceDTO struct {
 	Puissance   *int     `json:"puissance,omitempty"`
 	Etat        string   `json:"etat"`
 	Intensite   int      `json:"intensite"`
+
+	// Controller info returned by the LCU during device discovery
+	ControllerType          string `json:"controller_type,omitempty"`
+	ControllerFirmware      string `json:"controller_firmware,omitempty"`
+	ControllerSignalQuality *int   `json:"controller_signal_quality,omitempty"`
+	ControllerEmbedded      bool   `json:"controller_embedded"`
+	DimmingEnabled          bool   `json:"dimming_enabled"`
+	MeteringEnabled         bool   `json:"metering_enabled"`
+	ArmoireReference        string `json:"armoire_reference,omitempty"`
+	CircuitReference        string `json:"circuit_reference,omitempty"`
 }
 
 // LCUSyncLog represents a log entry for an LCU synchronization process.

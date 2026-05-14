@@ -12,6 +12,7 @@ import (
 
 	"map-interactif/internal/models"
 	"map-interactif/internal/repository"
+	"map-interactif/internal/services"
 	"map-interactif/internal/utils"
 )
 
@@ -221,6 +222,24 @@ func HandleUpdateCommissioningStatus(db *sql.DB) gin.HandlerFunc {
 			return
 		}
 		RespondJSON(c, http.StatusOK, map[string]string{"status": "success"})
+	}
+}
+
+// HandleDiagnoseLampadaire handles GET /api/lampadaires/:id/diagnostic.
+func HandleDiagnoseLampadaire(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, err := ParseIDParam(c, "id")
+		if err != nil {
+			RespondError(c, http.StatusBadRequest, "ID invalide")
+			return
+		}
+		lamp, err := repository.GetLampadaireByID(c.Request.Context(), db, id)
+		if err != nil {
+			RespondError(c, http.StatusNotFound, "Lampadaire introuvable")
+			return
+		}
+		result := services.DiagnoseLampadaireIssue(lamp)
+		RespondJSON(c, http.StatusOK, result)
 	}
 }
 

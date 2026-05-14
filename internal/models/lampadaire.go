@@ -29,6 +29,21 @@ type Lampadaire struct {
 	DiscoveredByLCU     bool   `json:"discovered_by_lcu"`
 	LocationStatus      string `json:"location_status"`
 	CommissioningStatus string `json:"commissioning_status"`
+
+	// Controller fields — embedded from LCU sync, not manually entered
+	ControllerUID           string  `json:"controller_uid,omitempty"`
+	ControllerType          string  `json:"controller_type,omitempty"`
+	ControllerStatus        string  `json:"controller_status,omitempty"`
+	ControllerSignalQuality *int    `json:"controller_signal_quality,omitempty"`
+	ControllerFirmware      string  `json:"controller_firmware,omitempty"`
+	ControllerLastSeenAt    *string `json:"controller_last_seen_at,omitempty"`
+	ControllerEmbedded      bool    `json:"controller_embedded"`
+	DimmingEnabled          bool    `json:"dimming_enabled"`
+	MeteringEnabled         bool    `json:"metering_enabled"`
+	ArmoireReference        string  `json:"armoire_reference,omitempty"`
+	CircuitReference        string  `json:"circuit_reference,omitempty"`
+	CabinetID               *int    `json:"cabinet_id,omitempty"`
+	CircuitID               *int    `json:"circuit_id,omitempty"`
 }
 
 // FormData holds HTML form input for creating/editing a lampadaire.

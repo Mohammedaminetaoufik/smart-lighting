@@ -78,6 +78,24 @@ func EnsureSchema(db *sql.DB) error {
 		ALTER TABLE lampadaires ADD COLUMN IF NOT EXISTS location_status TEXT NOT NULL DEFAULT 'manual';
 		ALTER TABLE lampadaires ADD COLUMN IF NOT EXISTS commissioning_status TEXT NOT NULL DEFAULT 'discovered';
 
+		-- Controller fields embedded in lampadaire (detected automatically during LCU sync)
+		ALTER TABLE lampadaires ADD COLUMN IF NOT EXISTS controller_uid TEXT;
+		ALTER TABLE lampadaires ADD COLUMN IF NOT EXISTS controller_type TEXT;
+		ALTER TABLE lampadaires ADD COLUMN IF NOT EXISTS controller_status TEXT NOT NULL DEFAULT 'unknown';
+		ALTER TABLE lampadaires ADD COLUMN IF NOT EXISTS controller_signal_quality INTEGER;
+		ALTER TABLE lampadaires ADD COLUMN IF NOT EXISTS controller_firmware TEXT;
+		ALTER TABLE lampadaires ADD COLUMN IF NOT EXISTS controller_last_seen_at TIMESTAMP NULL;
+		ALTER TABLE lampadaires ADD COLUMN IF NOT EXISTS controller_embedded BOOLEAN NOT NULL DEFAULT false;
+		ALTER TABLE lampadaires ADD COLUMN IF NOT EXISTS dimming_enabled BOOLEAN NOT NULL DEFAULT true;
+		ALTER TABLE lampadaires ADD COLUMN IF NOT EXISTS metering_enabled BOOLEAN NOT NULL DEFAULT false;
+		ALTER TABLE lampadaires ADD COLUMN IF NOT EXISTS armoire_reference TEXT;
+		ALTER TABLE lampadaires ADD COLUMN IF NOT EXISTS circuit_reference TEXT;
+
+		CREATE INDEX IF NOT EXISTS idx_lampadaires_controller_uid ON lampadaires(controller_uid) WHERE controller_uid IS NOT NULL;
+		CREATE INDEX IF NOT EXISTS idx_lampadaires_controller_status ON lampadaires(controller_status);
+		CREATE INDEX IF NOT EXISTS idx_lampadaires_armoire_ref ON lampadaires(armoire_reference) WHERE armoire_reference IS NOT NULL;
+		CREATE INDEX IF NOT EXISTS idx_lampadaires_circuit_ref ON lampadaires(circuit_reference) WHERE circuit_reference IS NOT NULL;
+
 		DO $$
 		BEGIN
 			IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_commissioning_status') THEN
@@ -399,6 +417,10 @@ func ensureSchemaV2(db *sql.DB) error {
 		ALTER TABLE alerts ADD CONSTRAINT check_alert_severity CHECK (severity IN ('info', 'warning', 'major', 'critical'));
 		ALTER TABLE alerts DROP CONSTRAINT IF EXISTS check_alert_status;
 		ALTER TABLE alerts ADD CONSTRAINT check_alert_status CHECK (status IN ('open', 'acknowledged', 'in_progress', 'resolved', 'closed'));
+
+		-- FK references to cabinets/circuits for lampadaires (after those tables are created)
+		ALTER TABLE lampadaires ADD COLUMN IF NOT EXISTS cabinet_id INTEGER REFERENCES cabinets(id) ON DELETE SET NULL;
+		ALTER TABLE lampadaires ADD COLUMN IF NOT EXISTS circuit_id INTEGER REFERENCES cabinet_circuits(id) ON DELETE SET NULL;
 
 		-- Commissioning workflow columns on lampadaires
 		ALTER TABLE lampadaires ADD COLUMN IF NOT EXISTS commissioning_step INT NOT NULL DEFAULT 0;

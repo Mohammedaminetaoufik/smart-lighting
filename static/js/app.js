@@ -25,9 +25,7 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
         if (page === 'admin') { loadAdminSettings(); loadAdminUsers(); loadAccessLogs(); }
         if (page === 'interventions') { loadInterventions(); }
         if (page === 'profiles') { loadLightingProfiles(); }
-        if (page === 'basestations') { loadBasestations(); }
         if (page === 'armoires') { loadCabinets(); }
-        if (page === 'controllers') { loadControllers(); }
         if (page === 'workorders') { loadWorkOrders(); }
         if (page === 'commissioning') { loadCommissioning(); }
 
@@ -343,6 +341,30 @@ function showDetailByID(id) {
             <div class="detail-item"><div class="dl">Dernière cmd</div><div class="dv">${fmt(l.last_command_at)}</div></div>
         </div></div>`;
 
+        // Bloc contrôleur — détecté automatiquement lors de la sync LCU
+        if (l.controller_embedded || l.controller_uid) {
+            const ctrlStatusClass = l.controller_status === 'ok' ? 'online' : l.controller_status === 'lost' ? 'offline' : 'maintenance';
+            html += `<div class="detail-section"><h4>Contrôleur intégré</h4>
+                <p style="font-size:12px;color:var(--text-dim);margin-bottom:8px;">Détecté automatiquement lors de la synchronisation LCU.</p>
+                <div class="detail-grid">
+                    <div class="detail-item"><div class="dl">UID</div><div class="dv" style="font-family:monospace;font-size:12px;">${esc(l.controller_uid||'—')}</div></div>
+                    <div class="detail-item"><div class="dl">Type</div><div class="dv">${esc(l.controller_type||'—')}</div></div>
+                    <div class="detail-item"><div class="dl">Statut</div><div class="dv"><span class="badge ${ctrlStatusClass}">${esc(l.controller_status||'unknown')}</span></div></div>
+                    <div class="detail-item"><div class="dl">Signal</div><div class="dv">${l.controller_signal_quality != null ? l.controller_signal_quality + '%' : '—'}</div></div>
+                    <div class="detail-item"><div class="dl">Firmware</div><div class="dv">${esc(l.controller_firmware||'—')}</div></div>
+                    <div class="detail-item"><div class="dl">Dernier contact</div><div class="dv">${fmt(l.controller_last_seen_at)}</div></div>
+                    <div class="detail-item"><div class="dl">Dimming</div><div class="dv">${l.dimming_enabled ? '✅ Actif' : '❌ Désactivé'}</div></div>
+                    <div class="detail-item"><div class="dl">Métering</div><div class="dv">${l.metering_enabled ? '✅ Actif' : '❌ Désactivé'}</div></div>
+                    ${l.armoire_reference ? `<div class="detail-item"><div class="dl">Armoire</div><div class="dv">${esc(l.armoire_reference)}</div></div>` : ''}
+                    ${l.circuit_reference ? `<div class="detail-item"><div class="dl">Circuit</div><div class="dv">${esc(l.circuit_reference)}</div></div>` : ''}
+                </div></div>`;
+        } else {
+            html += `<div class="detail-section"><h4>Contrôleur</h4>
+                <p style="font-size:13px;color:var(--text-dim);">
+                    ℹ️ Aucun contrôleur détecté. Les contrôleurs sont détectés automatiquement lors de la synchronisation avec la LCU / Gateway.
+                </p></div>`;
+        }
+
         // IoT data section
         html += `<div class="detail-section"><h4>Données IoT</h4><div id="detailIoT">Chargement...</div></div>`;
         html += `<div class="detail-section"><h4>Calculateur</h4><div id="detailCalc">
@@ -632,7 +654,10 @@ function testLCU(id, btn) {
 
 function syncLCU(id, btn) {
     withLoading(btn, fetch(`/api/lcus/${id}/sync`, {method:'POST'}).then(r=>r.json()).then(d => {
-        alert(d.message || "Synchronisation réussie");
+        const ctrlInfo = (d.with_controller > 0)
+            ? `\n👾 Contrôleurs détectés : ${d.with_controller}/${d.discovered}`
+            : '\nℹ️ Les contrôleurs sont détectés automatiquement lors de la synchronisation.';
+        alert((d.message || "Synchronisation réussie") + ctrlInfo);
         loadLCUs();
         if (window.location.search.includes('view=carte')) window.location.reload();
     }).catch(e => showToast("Erreur sync LCU: " + e.message)));

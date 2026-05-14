@@ -3,7 +3,6 @@ package controllers
 import (
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"html/template"
 	"net/http"
 	"strconv"
@@ -160,114 +159,20 @@ func HandleSyncLCU(db *sql.DB, adapter services.LCUAdapter) gin.HandlerFunc {
 			return
 		}
 
-		lcu, err := repository.GetLCUByID(c.Request.Context(), db, id)
+		result, err := services.SyncLCU(c.Request.Context(), db, adapter, id)
 		if err != nil {
-			RespondError(c, http.StatusNotFound, "LCU introuvable")
+			RespondError(c, http.StatusServiceUnavailable, "Erreur synchronisation: "+err.Error())
 			return
 		}
 
-		devices, err := adapter.DiscoverDevices(c.Request.Context(), lcu)
-		if err != nil {
-			log := models.LCUSyncLog{
-				LCUID:   id,
-				Status:  "failed",
-				Message: "echec decouverte : " + err.Error(),
-			}
-			repository.InsertLCUSyncLog(c.Request.Context(), db, log)
-			RespondError(c, http.StatusServiceUnavailable, log.Message)
-			return
-		}
-
-		discovered := len(devices)
-		created := 0
-		updated := 0
-		failed := 0
-
-		tx, err := db.BeginTx(c.Request.Context(), nil)
-		if err != nil {
-			RespondError(c, http.StatusInternalServerError, "Erreur transaction")
-			return
-		}
-		defer tx.Rollback()
-
-		for _, d := range devices {
-			var existingID int
-			var existingCommStatus string
-			err := tx.QueryRowContext(c.Request.Context(), "SELECT id, commissioning_status FROM lampadaires WHERE lcu_id = $1 AND device_uid = $2", id, d.DeviceUID).Scan(&existingID, &existingCommStatus)
-
-			locStatus := "confirmed"
-			lat := d.Latitude
-			lng := d.Longitude
-
-			if lat == nil || lng == nil {
-				locStatus = "estimated"
-				lat = lcu.Latitude
-				lng = lcu.Longitude
-			}
-
-			commStatus := "discovered"
-			if existingCommStatus != "" {
-				commStatus = existingCommStatus
-			}
-			if commStatus == "discovered" && (lat != nil && lng != nil) {
-				commStatus = "located"
-			}
-
-			lamp := models.Lampadaire{
-				Reference:           d.Reference,
-				Latitude:            lat,
-				Longitude:           lng,
-				Zone:                d.Zone,
-				TypeDriver:          d.TypeDriver,
-				Protocole:           d.Protocole,
-				Puissance:           d.Puissance,
-				Etat:                d.Etat,
-				Intensite:           d.Intensite,
-				LCUID:               &id,
-				DeviceUID:           d.DeviceUID,
-				NodeAddress:         d.NodeAddress,
-				DiscoveredByLCU:     true,
-				LocationStatus:      locStatus,
-				CommissioningStatus: commStatus,
-			}
-
-			if err == sql.ErrNoRows {
-				if err := repository.InsertLampadaireTx(c.Request.Context(), tx, lamp); err != nil {
-					failed++
-				} else {
-					created++
-				}
-			} else if err == nil {
-				lamp.ID = existingID
-				if err := repository.UpdateLampadaireTx(c.Request.Context(), tx, lamp); err != nil {
-					failed++
-				} else {
-					updated++
-				}
-			} else {
-				failed++
-			}
-		}
-
-		syncLog := models.LCUSyncLog{
-			LCUID:           id,
-			Status:          "success",
-			Message:         fmt.Sprintf("Synchronisation terminee : %d decouverts, %d cres, %d mis e jour, %d erreurs", discovered, created, updated, failed),
-			DiscoveredCount: discovered,
-			CreatedCount:    created,
-			UpdatedCount:    updated,
-			FailedCount:     failed,
-		}
-		repository.InsertLCUSyncLogTx(c.Request.Context(), tx, syncLog)
-
-		tx.ExecContext(c.Request.Context(), "UPDATE lcus SET last_sync_at = NOW() WHERE id = $1", id)
-
-		if err := tx.Commit(); err != nil {
-			RespondError(c, http.StatusInternalServerError, "Erreur commit")
-			return
-		}
-
-		RespondJSON(c, http.StatusOK, syncLog)
+		RespondJSON(c, http.StatusOK, gin.H{
+			"message":         result.Message,
+			"discovered":      result.DiscoveredCount,
+			"created":         result.CreatedCount,
+			"updated":         result.UpdatedCount,
+			"failed":          result.FailedCount,
+			"with_controller": result.ControllerCount,
+		})
 	}
 }
 

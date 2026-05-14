@@ -77,6 +77,7 @@ func main() {
 		api.GET("/lampadaires/missing-location", controllers.HandleGetMissingLocationLampadaires(db))
 		api.POST("/lampadaires/:id/location", controllers.HandleUpdateLampadaireLocation(db))
 		api.POST("/lampadaires/:id/commissioning", controllers.HandleUpdateCommissioningStatus(db))
+		api.GET("/lampadaires/:id/diagnostic", controllers.HandleDiagnoseLampadaire(db))
 
 		// Lighting Profiles API
 		api.GET("/lighting-profiles", controllers.HandleGetLightingProfiles(db))

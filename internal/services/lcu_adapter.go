@@ -52,16 +52,32 @@ func (a *MockLCUAdapter) DiscoverDevices(ctx context.Context, lcu *models.LCU) (
 		node := fmt.Sprintf("0x%02X", i+1)
 
 		puissance := 100 + rand.Intn(50)
+		signalQuality := 60 + rand.Intn(40) // 60-99%
+		controllerEmbedded := (i % 5) != 0  // 4 out of 5 have a controller
+		armoireRef := fmt.Sprintf("ARM-%s", lcu.Reference)
+		circuitRef := fmt.Sprintf("CIR-%02d", (i%2)+1)
+
 		d := models.LcuDeviceDTO{
-			DeviceUID:   uid,
-			Reference:   ref,
-			NodeAddress: node,
-			Zone:        lcu.Zone,
-			TypeDriver:  "DALI",
-			Protocole:   "ZigBee",
-			Puissance:   &puissance,
-			Etat:        "online",
-			Intensite:   70,
+			DeviceUID:        uid,
+			Reference:        ref,
+			NodeAddress:      node,
+			Zone:             lcu.Zone,
+			TypeDriver:       "DALI",
+			Protocole:        "ZigBee",
+			Puissance:        &puissance,
+			Etat:             "online",
+			Intensite:        70,
+			DimmingEnabled:   true,
+			MeteringEnabled:  rand.Intn(2) == 0,
+			ArmoireReference: armoireRef,
+			CircuitReference: circuitRef,
+		}
+
+		if controllerEmbedded {
+			d.ControllerType = "NLC-200"
+			d.ControllerFirmware = fmt.Sprintf("v2.%d.%d", rand.Intn(5), rand.Intn(10))
+			d.ControllerSignalQuality = &signalQuality
+			d.ControllerEmbedded = true
 		}
 
 		if i < count-2 {
