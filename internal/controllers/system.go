@@ -94,3 +94,116 @@ func HandleSystemVersion(c *gin.Context) {
 		"started_at": startedAt.Format(time.RFC3339),
 	})
 }
+
+// JobHeartbeat represents a background job status.
+type JobHeartbeat struct {
+	Name      string    `json:"name"`
+	LastRunAt time.Time `json:"last_run_at"`
+	Status    string    `json:"status"`
+	Message   string    `json:"message,omitempty"`
+}
+
+// HandleSystemJobs handles GET /api/system/jobs.
+func HandleSystemJobs(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		rows, err := db.QueryContext(c.Request.Context(), `
+			SELECT name, last_run_at, status, message 
+			FROM job_heartbeats 
+			ORDER BY name
+		`)
+		if err != nil {
+			RespondError(c, http.StatusInternalServerError, "Impossible de charger les tâches : "+err.Error())
+			return
+		}
+		defer rows.Close()
+
+		jobs := []JobHeartbeat{}
+		for rows.Next() {
+			var job JobHeartbeat
+			var msg sql.NullString
+			if err := rows.Scan(&job.Name, &job.LastRunAt, &job.Status, &msg); err != nil {
+				RespondError(c, http.StatusInternalServerError, "Erreur de lecture de tâche : "+err.Error())
+				return
+			}
+			if msg.Valid {
+				job.Message = msg.String
+			}
+			jobs = append(jobs, job)
+		}
+
+		RespondJSON(c, http.StatusOK, jobs)
+	}
+}
+
+// HandleGetSystemConfig handles GET /api/system/config.
+func HandleGetSystemConfig(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		defaults := map[string]string{
+			"alert.temp_critical_threshold":   "85",
+			"alert.power_abnormal_multiplier": "1.5",
+			"job.offline_check_interval_min":   "15",
+			"job.telemetry_retention_days":     "90",
+			"lcu.sync_interval_min":           "10",
+		}
+
+		rows, err := db.QueryContext(c.Request.Context(), "SELECT key, value FROM system_settings")
+		if err != nil {
+			// If table doesn't exist yet, we still return the defaults rather than failing
+			RespondJSON(c, http.StatusOK, defaults)
+			return
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var k, v string
+			if err := rows.Scan(&k, &v); err == nil {
+				defaults[k] = v
+			}
+		}
+
+		RespondJSON(c, http.StatusOK, defaults)
+	}
+}
+
+// HandleUpdateSystemConfig handles PUT /api/system/config.
+func HandleUpdateSystemConfig(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req map[string]string
+		if err := c.ShouldBindJSON(&req); err != nil {
+			RespondError(c, http.StatusBadRequest, "Corps de requête invalide")
+			return
+		}
+
+		tx, err := db.BeginTx(c.Request.Context(), nil)
+		if err != nil {
+			RespondError(c, http.StatusInternalServerError, "Impossible de démarrer la transaction : "+err.Error())
+			return
+		}
+		defer tx.Rollback()
+
+		stmt, err := tx.PrepareContext(c.Request.Context(), `
+			INSERT INTO system_settings (key, value, updated_at)
+			VALUES ($1, $2, NOW())
+			ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+		`)
+		if err != nil {
+			RespondError(c, http.StatusInternalServerError, "Erreur de préparation : "+err.Error())
+			return
+		}
+		defer stmt.Close()
+
+		for k, v := range req {
+			if _, err := stmt.ExecContext(c.Request.Context(), k, v); err != nil {
+				RespondError(c, http.StatusInternalServerError, "Erreur d'enregistrement : "+err.Error())
+				return
+			}
+		}
+
+		if err := tx.Commit(); err != nil {
+			RespondError(c, http.StatusInternalServerError, "Erreur lors de la validation : "+err.Error())
+			return
+		}
+
+		RespondJSON(c, http.StatusOK, gin.H{"status": "ok"})
+	}
+}

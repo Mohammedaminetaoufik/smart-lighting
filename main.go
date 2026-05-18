@@ -32,6 +32,10 @@ func main() {
 		log.Fatal(err)
 	}
 
+	if err := repository.SeedMockDataIfEmpty(db); err != nil {
+		log.Printf("Warning: Database seeder failed: %v", err)
+	}
+
 	// Background service: mark offline lampadaires every minute
 	go func() {
 		ticker := time.NewTicker(1 * time.Minute)

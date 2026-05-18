@@ -60,7 +60,7 @@ func HandleGetDailyEnergy(db *sql.DB) gin.HandlerFunc {
 					SUM(puissance) * 5.0 / 60.0 / 1000.0
 				) AS kwh
 			FROM sensor_measurements
-			WHERE created_at >= NOW() - ($1::text || ' days')::interval
+			WHERE created_at >= NOW() - ($1 * INTERVAL '1 day')
 			  AND (energie IS NOT NULL OR puissance IS NOT NULL)
 			GROUP BY DATE(created_at)
 			ORDER BY day
