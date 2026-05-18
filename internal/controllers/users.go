@@ -3,12 +3,79 @@ package controllers
 import (
 	"database/sql"
 	"net/http"
+	"regexp"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
 	"map-interactif/internal/models"
 	"map-interactif/internal/repository"
+	"map-interactif/internal/services"
 )
+
+var (
+	emailRegex        = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
+	validRoles        = map[string]bool{"admin": true, "operator": true, "viewer": true}
+	validUserStatuses = map[string]bool{"active": true, "disabled": true}
+)
+
+func validateUserPayload(u *models.User) string {
+	u.FullName = strings.TrimSpace(u.FullName)
+	u.Email = strings.TrimSpace(strings.ToLower(u.Email))
+	u.Role = strings.TrimSpace(u.Role)
+	u.Status = strings.TrimSpace(u.Status)
+
+	if u.FullName == "" {
+		return "Le nom est obligatoire"
+	}
+	if u.Email == "" || !emailRegex.MatchString(u.Email) {
+		return "Email invalide"
+	}
+	if u.Role == "" {
+		u.Role = "viewer"
+	}
+	if !validRoles[u.Role] {
+		return "Rôle invalide (admin, operator, viewer)"
+	}
+	if u.Status == "" {
+		u.Status = "active"
+	}
+	if !validUserStatuses[u.Status] {
+		return "Statut invalide (active, disabled)"
+	}
+	return ""
+}
+
+// mergeUserUpdates fills empty fields in payload with values from existing.
+func mergeUserUpdates(payload, existing *models.User) {
+	if payload.FullName == "" {
+		payload.FullName = existing.FullName
+	}
+	if payload.Email == "" {
+		payload.Email = existing.Email
+	}
+	if payload.Role == "" {
+		payload.Role = existing.Role
+	}
+	if payload.Status == "" {
+		payload.Status = existing.Status
+	}
+}
+
+// checkEmailAvailable verifies the email isn't taken. Writes 409/500 and returns
+// false if the request should not proceed.
+func checkEmailAvailable(c *gin.Context, db *sql.DB, email string, excludeID int) bool {
+	exists, err := repository.EmailExists(c.Request.Context(), db, email, excludeID)
+	if err != nil {
+		RespondError(c, http.StatusInternalServerError, "Erreur vérification email")
+		return false
+	}
+	if exists {
+		RespondError(c, http.StatusConflict, "Cet email est déjà utilisé")
+		return false
+	}
+	return true
+}
 
 // HandleGetUsers handles GET /api/users.
 func HandleGetUsers(db *sql.DB) gin.HandlerFunc {
@@ -22,20 +89,122 @@ func HandleGetUsers(db *sql.DB) gin.HandlerFunc {
 	}
 }
 
+// HandleGetUser handles GET /api/users/:id.
+func HandleGetUser(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, err := ParseIDParam(c, "id")
+		if err != nil {
+			RespondError(c, http.StatusBadRequest, errInvalidID)
+			return
+		}
+		u, err := repository.GetUserByID(c.Request.Context(), db, id)
+		if err != nil {
+			RespondError(c, http.StatusNotFound, "Utilisateur introuvable")
+			return
+		}
+		RespondJSON(c, http.StatusOK, u)
+	}
+}
+
 // HandleCreateUser handles POST /api/users.
 func HandleCreateUser(db *sql.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var u models.User
-		if err := c.ShouldBindJSON(&u); err != nil {
-			RespondError(c, http.StatusBadRequest, err.Error())
+		if !BindRequiredJSON(c, &u) {
+			return
+		}
+		if msg := validateUserPayload(&u); msg != "" {
+			RespondError(c, http.StatusBadRequest, msg)
+			return
+		}
+		if !checkEmailAvailable(c, db, u.Email, 0) {
 			return
 		}
 		id, err := repository.InsertUser(c.Request.Context(), db, u)
 		if err != nil {
-			RespondError(c, http.StatusInternalServerError, err.Error())
+			RespondError(c, http.StatusInternalServerError, "Erreur création: "+err.Error())
 			return
 		}
 		u.ID = id
+		services.LogAction(c.Request.Context(), db, services.AuditEvent{
+			Action:     "user.create",
+			TargetType: "user",
+			TargetID:   &id,
+			IPAddress:  c.ClientIP(),
+			UserAgent:  c.Request.UserAgent(),
+			Metadata:   map[string]interface{}{"email": u.Email, "role": u.Role},
+		})
+		RespondJSON(c, http.StatusCreated, u)
+	}
+}
+
+// HandleUpdateUser handles PATCH /api/users/:id.
+func HandleUpdateUser(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, err := ParseIDParam(c, "id")
+		if err != nil {
+			RespondError(c, http.StatusBadRequest, errInvalidID)
+			return
+		}
+		existing, err := repository.GetUserByID(c.Request.Context(), db, id)
+		if err != nil {
+			RespondError(c, http.StatusNotFound, "Utilisateur introuvable")
+			return
+		}
+		var payload models.User
+		if !BindRequiredJSON(c, &payload) {
+			return
+		}
+		mergeUserUpdates(&payload, existing)
+		if msg := validateUserPayload(&payload); msg != "" {
+			RespondError(c, http.StatusBadRequest, msg)
+			return
+		}
+		if payload.Email != existing.Email && !checkEmailAvailable(c, db, payload.Email, id) {
+			return
+		}
+		if err := repository.UpdateUser(c.Request.Context(), db, id,
+			payload.FullName, payload.Email, payload.Role, payload.Status); err != nil {
+			RespondError(c, http.StatusInternalServerError, err.Error())
+			return
+		}
+		services.LogAction(c.Request.Context(), db, services.AuditEvent{
+			Action:     "user.update",
+			TargetType: "user",
+			TargetID:   &id,
+			IPAddress:  c.ClientIP(),
+			UserAgent:  c.Request.UserAgent(),
+			Metadata: map[string]interface{}{
+				"changes": map[string]interface{}{
+					"role":   payload.Role,
+					"status": payload.Status,
+				},
+			},
+		})
+		u, _ := repository.GetUserByID(c.Request.Context(), db, id)
 		RespondJSON(c, http.StatusOK, u)
+	}
+}
+
+// HandleDeleteUser handles DELETE /api/users/:id (soft delete).
+func HandleDeleteUser(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, err := ParseIDParam(c, "id")
+		if err != nil {
+			RespondError(c, http.StatusBadRequest, errInvalidID)
+			return
+		}
+		if err := repository.SoftDeleteUser(c.Request.Context(), db, id); err != nil {
+			RespondError(c, http.StatusNotFound, err.Error())
+			return
+		}
+		services.LogAction(c.Request.Context(), db, services.AuditEvent{
+			Action:     "user.delete",
+			TargetType: "user",
+			TargetID:   &id,
+			IPAddress:  c.ClientIP(),
+			UserAgent:  c.Request.UserAgent(),
+		})
+		RespondJSON(c, http.StatusOK, gin.H{"status": "deleted", "id": id})
 	}
 }

@@ -117,7 +117,9 @@ func HandleRunCalculator(db *sql.DB, adapter services.LCUAdapter) gin.HandlerFun
 		var body struct {
 			Apply bool `json:"apply"`
 		}
-		c.BindJSON(&body)
+		if !BindOptionalJSON(c, &body) {
+			return
+		}
 		decision, err := runIntelligentCalculator(c.Request.Context(), db, adapter, id, body.Apply)
 		if err != nil {
 			log.Printf("calculator error lamp=%d: %v", id, err)
@@ -134,7 +136,9 @@ func HandleRunCalculatorAll(db *sql.DB, adapter services.LCUAdapter) gin.Handler
 		var body struct {
 			Apply bool `json:"apply"`
 		}
-		c.BindJSON(&body)
+		if !BindOptionalJSON(c, &body) {
+			return
+		}
 		rows, err := db.QueryContext(c.Request.Context(), `SELECT id FROM lampadaires WHERE archived_at IS NULL`)
 		if err != nil {
 			RespondError(c, http.StatusInternalServerError, "Erreur.")

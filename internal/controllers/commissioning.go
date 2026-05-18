@@ -1,4 +1,4 @@
-package controllers
+﻿package controllers
 
 import (
 	"context"
@@ -51,7 +51,7 @@ func HandleAdvanceCommissioning(db *sql.DB) gin.HandlerFunc {
 		newStep := currentStep + 1
 		newStatus := commissioningStatusByStep[newStep]
 		if err := updateCommissioningStep(db, id, newStep, newStatus); err != nil {
-			RespondError(c, http.StatusInternalServerError, "Erreur mise à jour")
+			fmt.Println("DB Error:", err); RespondError(c, http.StatusInternalServerError, err.Error())
 			return
 		}
 		RespondJSON(c, http.StatusOK, gin.H{"step": newStep, "status": newStatus, "lampadaire_id": id})
@@ -69,13 +69,15 @@ func HandleTestCommCommissioning(db *sql.DB) gin.HandlerFunc {
 		var body struct {
 			Result string `json:"result"` // "ok" or "failed"
 		}
-		_ = c.BindJSON(&body)
+		if !BindOptionalJSON(c, &body) {
+			return
+		}
 		result := body.Result
 		if result != "ok" && result != "failed" {
 			result = "ok"
 		}
 		if _, err := db.Exec(`UPDATE lampadaires SET test_comm_status=$1, updated_at=NOW() WHERE id=$2`, result, id); err != nil {
-			RespondError(c, http.StatusInternalServerError, "Erreur mise à jour")
+			fmt.Println("DB Error:", err); RespondError(c, http.StatusInternalServerError, err.Error())
 			return
 		}
 		RespondJSON(c, http.StatusOK, gin.H{"test_comm_status": result, "lampadaire_id": id})
@@ -93,13 +95,15 @@ func HandleTestDimmingCommissioning(db *sql.DB) gin.HandlerFunc {
 		var body struct {
 			Result string `json:"result"` // "ok" or "failed"
 		}
-		_ = c.BindJSON(&body)
+		if !BindOptionalJSON(c, &body) {
+			return
+		}
 		result := body.Result
 		if result != "ok" && result != "failed" {
 			result = "ok"
 		}
 		if _, err := db.Exec(`UPDATE lampadaires SET test_dimming_status=$1, updated_at=NOW() WHERE id=$2`, result, id); err != nil {
-			RespondError(c, http.StatusInternalServerError, "Erreur mise à jour")
+			fmt.Println("DB Error:", err); RespondError(c, http.StatusInternalServerError, err.Error())
 			return
 		}
 		RespondJSON(c, http.StatusOK, gin.H{"test_dimming_status": result, "lampadaire_id": id})
@@ -118,9 +122,9 @@ func HandleValidateCommissioning(db *sql.DB) gin.HandlerFunc {
 		if _, err := db.Exec(`
 			UPDATE lampadaires
 			SET commissioning_step=$1, commissioning_status='commissioned',
-			    commissioned_at=$2, updated_at=$2
+			    commissioned_at=$2, updated_at=NOW()
 			WHERE id=$3`, stepCommissioned, now, id); err != nil {
-			RespondError(c, http.StatusInternalServerError, "Erreur mise à jour")
+			fmt.Println("DB Error:", err); RespondError(c, http.StatusInternalServerError, err.Error())
 			return
 		}
 		RespondJSON(c, http.StatusOK, gin.H{"status": "commissioned", "lampadaire_id": id, "commissioned_at": now})
@@ -138,13 +142,15 @@ func HandleFailCommissioning(db *sql.DB) gin.HandlerFunc {
 		var body struct {
 			Notes string `json:"notes"`
 		}
-		_ = c.BindJSON(&body)
+		if !BindOptionalJSON(c, &body) {
+			return
+		}
 		if _, err := db.Exec(`
 			UPDATE lampadaires
 			SET commissioning_step=$1, commissioning_status='failed',
 			    commissioning_notes=$2, updated_at=NOW()
 			WHERE id=$3`, stepFailed, body.Notes, id); err != nil {
-			RespondError(c, http.StatusInternalServerError, "Erreur mise à jour")
+			fmt.Println("DB Error:", err); RespondError(c, http.StatusInternalServerError, err.Error())
 			return
 		}
 		repository.CreateAlertIfNotExists(context.Background(), db, id, "commissioning_failed", "warning",

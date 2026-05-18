@@ -109,6 +109,31 @@ func HandleRestoreLampadaire(db *sql.DB) gin.HandlerFunc {
 	}
 }
 
+// HandleListLampadairesJSON handles GET /api/lampadaires — lists all non-archived lampadaires.
+func HandleListLampadairesJSON(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		filters := map[string]string{}
+		if etat := c.Query("etat"); etat != "" {
+			filters["etat"] = etat
+		}
+		if zone := c.Query("zone"); zone != "" {
+			filters["zone"] = zone
+		}
+		if q := c.Query("q"); q != "" {
+			filters["q"] = q
+		}
+		lamps, err := repository.ListLampadaires(c.Request.Context(), db, filters)
+		if err != nil {
+			RespondError(c, http.StatusInternalServerError, "Erreur base de données")
+			return
+		}
+		if lamps == nil {
+			lamps = []models.Lampadaire{}
+		}
+		RespondJSON(c, http.StatusOK, lamps)
+	}
+}
+
 // HandleGetLampadaireJSON handles GET /api/lampadaires/:id.
 func HandleGetLampadaireJSON(db *sql.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {

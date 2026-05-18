@@ -101,8 +101,20 @@ func HandleAssignWorkOrder(db *sql.DB) gin.HandlerFunc {
 		var body struct {
 			UserID int `json:"user_id"`
 		}
-		if err := c.BindJSON(&body); err != nil || body.UserID <= 0 {
+		if !BindRequiredJSON(c, &body) {
+			return
+		}
+		if body.UserID <= 0 {
 			RespondError(c, http.StatusBadRequest, "user_id invalide")
+			return
+		}
+		var userExists bool
+		if err := db.QueryRow(`SELECT EXISTS(SELECT 1 FROM users WHERE id=$1 AND COALESCE(status,'active') != 'deleted')`, body.UserID).Scan(&userExists); err != nil {
+			RespondError(c, http.StatusInternalServerError, "Erreur vérification utilisateur")
+			return
+		}
+		if !userExists {
+			RespondError(c, http.StatusNotFound, "Utilisateur introuvable")
 			return
 		}
 		if err := repository.AssignWorkOrder(db, id, body.UserID); err != nil {

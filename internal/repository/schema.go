@@ -270,9 +270,7 @@ func EnsureSchema(db *sql.DB) error {
 			IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'check_alert_severity') THEN
 				ALTER TABLE alerts ADD CONSTRAINT check_alert_severity CHECK (severity IN ('info', 'warning', 'critical'));
 			END IF;
-			-- Drop and recreate check_alert_status to include 'in_progress'
-			ALTER TABLE alerts DROP CONSTRAINT IF EXISTS check_alert_status;
-			ALTER TABLE alerts ADD CONSTRAINT check_alert_status CHECK (status IN ('open', 'resolved', 'in_progress'));
+			-- check_alert_status is fully redefined in ensureSchemaV2 with all valid values
 
 			-- Dimming commands constraints
 			IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'check_dimming_status') THEN
@@ -441,6 +439,45 @@ func ensureSchemaV2(db *sql.DB) error {
 			END IF;
 		END $$;
 
+		-- Job heartbeats (Tier 4 observability)
+		CREATE TABLE IF NOT EXISTS job_heartbeats (
+			name TEXT PRIMARY KEY,
+			last_run_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+			status TEXT NOT NULL DEFAULT 'ok',
+			message TEXT,
+			updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+		);
+
+		-- Maintenance windows (Tier 4)
+		CREATE TABLE IF NOT EXISTS maintenance_windows (
+			id SERIAL PRIMARY KEY,
+			zone TEXT,
+			lampadaire_ids JSONB,
+			starts_at TIMESTAMP WITH TIME ZONE NOT NULL,
+			ends_at TIMESTAMP WITH TIME ZONE NOT NULL,
+			reason TEXT,
+			created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+			created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+		);
+		CREATE INDEX IF NOT EXISTS idx_maintenance_active ON maintenance_windows(starts_at, ends_at);
+
+		-- Users auth extensions (Tier 1)
+		ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP WITH TIME ZONE;
+		DO $$
+		BEGIN
+			IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'check_user_role') THEN
+				ALTER TABLE users ADD CONSTRAINT check_user_role CHECK (role IN ('admin', 'operator', 'viewer'));
+			END IF;
+			IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'check_user_status') THEN
+				ALTER TABLE users ADD CONSTRAINT check_user_status CHECK (status IN ('active', 'disabled', 'deleted'));
+			END IF;
+		END $$;
+
+		-- Audit log extensions (Tier 2)
+		ALTER TABLE access_logs ADD COLUMN IF NOT EXISTS target_type TEXT;
+		ALTER TABLE access_logs ADD COLUMN IF NOT EXISTS target_id INTEGER;
+		ALTER TABLE access_logs ADD COLUMN IF NOT EXISTS metadata JSONB;
+
 		-- Indexes
 		CREATE INDEX IF NOT EXISTS idx_basestations_status ON basestations(status);
 		CREATE INDEX IF NOT EXISTS idx_basestations_zone ON basestations(zone);
@@ -453,6 +490,51 @@ func ensureSchemaV2(db *sql.DB) error {
 		CREATE INDEX IF NOT EXISTS idx_alerts_source_type ON alerts(source_type);
 		CREATE INDEX IF NOT EXISTS idx_alerts_severity ON alerts(severity);
 		CREATE INDEX IF NOT EXISTS idx_alerts_status ON alerts(status);
+		CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+		CREATE INDEX IF NOT EXISTS idx_access_logs_user ON access_logs(user_id);
+		CREATE INDEX IF NOT EXISTS idx_access_logs_created ON access_logs(created_at DESC);
+		CREATE INDEX IF NOT EXISTS idx_access_logs_action ON access_logs(action);
+
+		-- Tier 4 Schema Extensions
+		CREATE TABLE IF NOT EXISTS job_heartbeats (
+			name TEXT PRIMARY KEY,
+			last_run_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+			status TEXT NOT NULL
+		);
+
+		ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS updated_by INTEGER REFERENCES users(id);
+
+		CREATE TABLE IF NOT EXISTS maintenance_windows (
+			id SERIAL PRIMARY KEY,
+			zone TEXT,
+			lampadaire_ids INTEGER[],
+			starts_at TIMESTAMP WITH TIME ZONE NOT NULL,
+			ends_at TIMESTAMP WITH TIME ZONE NOT NULL,
+			reason TEXT,
+			created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+			created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+		);
+
+		CREATE TABLE IF NOT EXISTS alerts_archive (
+			id INTEGER PRIMARY KEY,
+			lampadaire_id INTEGER,
+			type TEXT,
+			severity TEXT,
+			message TEXT,
+			status TEXT,
+			created_at TIMESTAMP,
+			resolved_at TIMESTAMP,
+			source_type TEXT,
+			cabinet_id INTEGER,
+			basestation_id INTEGER,
+			circuit_id INTEGER,
+			acknowledged_at TIMESTAMP,
+			closed_at TIMESTAMP,
+			probable_cause TEXT,
+			recommended_action TEXT,
+			archived_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+		);
+
 	`)
 	return err
 }

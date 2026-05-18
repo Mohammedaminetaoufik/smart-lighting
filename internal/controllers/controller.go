@@ -73,7 +73,10 @@ func HandleAssociateController(db *sql.DB) gin.HandlerFunc {
 		var body struct {
 			LampadaireID int `json:"lampadaire_id"`
 		}
-		if err := c.BindJSON(&body); err != nil || body.LampadaireID <= 0 {
+		if !BindRequiredJSON(c, &body) {
+			return
+		}
+		if body.LampadaireID <= 0 {
 			RespondError(c, http.StatusBadRequest, "lampadaire_id invalide")
 			return
 		}

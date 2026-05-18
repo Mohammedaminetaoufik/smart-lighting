@@ -56,10 +56,18 @@ func HandleResolveAlert(db *sql.DB) gin.HandlerFunc {
 func HandleGetAlertCounts(db *sql.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var total, critical, warning, resolved int
-		db.QueryRowContext(c.Request.Context(), `SELECT COUNT(*) FROM alerts WHERE status='open'`).Scan(&total)
-		db.QueryRowContext(c.Request.Context(), `SELECT COUNT(*) FROM alerts WHERE status='open' AND severity='critical'`).Scan(&critical)
-		db.QueryRowContext(c.Request.Context(), `SELECT COUNT(*) FROM alerts WHERE status='open' AND severity='warning'`).Scan(&warning)
-		db.QueryRowContext(c.Request.Context(), `SELECT COUNT(*) FROM alerts WHERE status='resolved'`).Scan(&resolved)
+		err := db.QueryRowContext(c.Request.Context(), `
+			SELECT
+				COUNT(*) FILTER (WHERE status='open'),
+				COUNT(*) FILTER (WHERE status='open' AND severity='critical'),
+				COUNT(*) FILTER (WHERE status='open' AND severity='warning'),
+				COUNT(*) FILTER (WHERE status='resolved')
+			FROM alerts
+		`).Scan(&total, &critical, &warning, &resolved)
+		if err != nil {
+			RespondError(c, http.StatusInternalServerError, "Erreur de chargement des compteurs")
+			return
+		}
 
 		RespondJSON(c, http.StatusOK, gin.H{
 			"total":    total,
@@ -74,9 +82,16 @@ func HandleGetAlertCounts(db *sql.DB) gin.HandlerFunc {
 func HandleGetAlertSummary(db *sql.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var total, critical, warning int
-		db.QueryRowContext(c.Request.Context(), `SELECT COUNT(*) FROM alerts WHERE status='open'`).Scan(&total)
-		db.QueryRowContext(c.Request.Context(), `SELECT COUNT(*) FROM alerts WHERE status='open' AND severity='critical'`).Scan(&critical)
-		db.QueryRowContext(c.Request.Context(), `SELECT COUNT(*) FROM alerts WHERE status='open' AND severity='warning'`).Scan(&warning)
+		if err := db.QueryRowContext(c.Request.Context(), `
+			SELECT
+				COUNT(*) FILTER (WHERE status='open'),
+				COUNT(*) FILTER (WHERE status='open' AND severity='critical'),
+				COUNT(*) FILTER (WHERE status='open' AND severity='warning')
+			FROM alerts
+		`).Scan(&total, &critical, &warning); err != nil {
+			RespondError(c, http.StatusInternalServerError, "Erreur de chargement du résumé")
+			return
+		}
 
 		rows, err := db.QueryContext(c.Request.Context(), `
 			SELECT COALESCE(l.zone, 'Inconnue'), COUNT(*)

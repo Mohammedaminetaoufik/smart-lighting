@@ -36,7 +36,38 @@ func main() {
 	go func() {
 		ticker := time.NewTicker(1 * time.Minute)
 		for range ticker.C {
-			repository.MarkInactiveLampadairesOffline(context.Background(), db)
+			if err := repository.MarkInactiveLampadairesOffline(context.Background(), db); err != nil {
+				services.Heartbeat(context.Background(), db, "mark_offline", "error", err.Error())
+			} else {
+				services.Heartbeat(context.Background(), db, "mark_offline", "ok", "")
+			}
+		}
+	}()
+
+	// Background service: daily data retention (telemetry + audit logs)
+	go func() {
+		ticker := time.NewTicker(24 * time.Hour)
+		runRetention := func() {
+			ctx := context.Background()
+			// Get retention setting (default 90 days)
+			retention := 90
+			db.QueryRowContext(ctx,
+				"SELECT COALESCE(value::int, 90) FROM system_settings WHERE key='job.telemetry_retention_days'").Scan(&retention)
+
+			if _, err := db.ExecContext(ctx,
+				"DELETE FROM sensor_measurements WHERE created_at < NOW() - ($1::text || ' days')::interval",
+				retention); err != nil {
+				services.Heartbeat(ctx, db, "data_retention", "error", err.Error())
+				return
+			}
+			// Audit logs older than 1 year
+			db.ExecContext(ctx, "DELETE FROM access_logs WHERE created_at < NOW() - INTERVAL '1 year'")
+			services.Heartbeat(ctx, db, "data_retention", "ok", "")
+		}
+		// Run once at startup then daily
+		go runRetention()
+		for range ticker.C {
+			runRetention()
 		}
 	}()
 
@@ -62,6 +93,9 @@ func main() {
 		// Users & Logs
 		api.GET("/users", controllers.HandleGetUsers(db))
 		api.POST("/users", controllers.HandleCreateUser(db))
+		api.GET("/users/:id", controllers.HandleGetUser(db))
+		api.PATCH("/users/:id", controllers.HandleUpdateUser(db))
+		api.DELETE("/users/:id", controllers.HandleDeleteUser(db))
 		api.GET("/logs", controllers.HandleGetLogs(db))
 
 		// LCU API
@@ -73,8 +107,9 @@ func main() {
 		api.GET("/lcus/:id/lampadaires", controllers.HandleGetLCULampadaires(db))
 
 		// Lampadaires API
-		api.GET("/lampadaires/:id", controllers.HandleGetLampadaireJSON(db))
+		api.GET("/lampadaires", controllers.HandleListLampadairesJSON(db))
 		api.GET("/lampadaires/missing-location", controllers.HandleGetMissingLocationLampadaires(db))
+		api.GET("/lampadaires/:id", controllers.HandleGetLampadaireJSON(db))
 		api.POST("/lampadaires/:id/location", controllers.HandleUpdateLampadaireLocation(db))
 		api.POST("/lampadaires/:id/commissioning", controllers.HandleUpdateCommissioningStatus(db))
 		api.GET("/lampadaires/:id/diagnostic", controllers.HandleDiagnoseLampadaire(db))
@@ -177,6 +212,39 @@ func main() {
 		api.POST("/commissioning/:id/test-dimming", controllers.HandleTestDimmingCommissioning(db))
 		api.POST("/commissioning/:id/validate", controllers.HandleValidateCommissioning(db))
 		api.POST("/commissioning/:id/fail", controllers.HandleFailCommissioning(db))
+
+		// Bulk operations
+		api.PATCH("/lampadaires/bulk", controllers.HandleBulkUpdateLampadaires(db))
+		api.POST("/lampadaires/bulk/archive", controllers.HandleBulkArchiveLampadaires(db))
+		api.POST("/alerts/bulk-action", controllers.HandleBulkAlertAction(db))
+		api.POST("/workorders/bulk-assign", controllers.HandleBulkAssignWorkOrders(db))
+
+		// CSV Exports
+		api.GET("/export/lampadaires", controllers.HandleExportLampadaires(db))
+		api.GET("/export/alerts", controllers.HandleExportAlerts(db))
+		api.GET("/export/workorders", controllers.HandleExportWorkOrders(db))
+
+		// Audit Log
+		api.GET("/audit-logs", controllers.HandleGetAuditLogs(db))
+
+		// Global search
+		api.GET("/search", controllers.HandleGlobalSearch(db))
+
+		// System / observability
+		api.GET("/health", controllers.HandleHealth(db))
+		api.GET("/system/health", controllers.HandleSystemHealth(db))
+		api.GET("/system/version", controllers.HandleSystemVersion)
+		api.GET("/system/jobs", controllers.HandleSystemJobs(db))
+		api.GET("/system/config", controllers.HandleGetSystemConfig(db))
+		api.PUT("/system/config", controllers.HandleUpdateSystemConfig(db))
+
+		// Maintenance Windows
+		api.GET("/maintenance-windows", controllers.HandleGetMaintenanceWindows(db))
+		api.POST("/maintenance-windows", controllers.HandleCreateMaintenanceWindow(db))
+		api.DELETE("/maintenance-windows/:id", controllers.HandleDeleteMaintenanceWindow(db))
+
+		// CSV import
+		api.POST("/lampadaires/import", controllers.HandleImportLampadaires(db))
 	}
 
 	port := os.Getenv("PORT")
