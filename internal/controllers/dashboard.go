@@ -3,6 +3,8 @@ package controllers
 import (
 	"database/sql"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -31,6 +33,60 @@ func HandleGetEnergySummary(db *sql.DB) gin.HandlerFunc {
 			return
 		}
 		RespondJSON(c, http.StatusOK, summary)
+	}
+}
+
+// HandleGetDailyEnergy handles GET /api/energy/daily?days=30
+// Returns estimated daily kWh from sensor_measurements for the last N days.
+func HandleGetDailyEnergy(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		days := 30
+		if d, err := strconv.Atoi(c.Query("days")); err == nil && d > 0 && d <= 365 {
+			days = d
+		}
+
+		type DayEnergy struct {
+			Date string  `json:"date"`
+			KWh  float64 `json:"kwh"`
+		}
+
+		// Sum energy field if populated; otherwise estimate from puissance readings
+		// assuming ~5-minute measurement intervals (5/60 h per record).
+		rows, err := db.QueryContext(c.Request.Context(), `
+			SELECT
+				DATE(created_at)::text AS day,
+				COALESCE(
+					NULLIF(SUM(energie), 0),
+					SUM(puissance) * 5.0 / 60.0 / 1000.0
+				) AS kwh
+			FROM sensor_measurements
+			WHERE created_at >= NOW() - ($1::text || ' days')::interval
+			  AND (energie IS NOT NULL OR puissance IS NOT NULL)
+			GROUP BY DATE(created_at)
+			ORDER BY day
+		`, days)
+		if err != nil {
+			RespondError(c, http.StatusInternalServerError, err.Error())
+			return
+		}
+		defer rows.Close()
+
+		// Build a full 30-day series filling missing days with 0
+		result := make([]DayEnergy, 0, days)
+		byDate := map[string]float64{}
+		for rows.Next() {
+			var d DayEnergy
+			if err := rows.Scan(&d.Date, &d.KWh); err == nil {
+				byDate[d.Date] = d.KWh
+			}
+		}
+
+		for i := days - 1; i >= 0; i-- {
+			day := time.Now().AddDate(0, 0, -i).Format("2006-01-02")
+			result = append(result, DayEnergy{Date: day, KWh: byDate[day]})
+		}
+
+		RespondJSON(c, http.StatusOK, result)
 	}
 }
 

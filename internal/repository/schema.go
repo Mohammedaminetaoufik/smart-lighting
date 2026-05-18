@@ -96,12 +96,7 @@ func EnsureSchema(db *sql.DB) error {
 		CREATE INDEX IF NOT EXISTS idx_lampadaires_armoire_ref ON lampadaires(armoire_reference) WHERE armoire_reference IS NOT NULL;
 		CREATE INDEX IF NOT EXISTS idx_lampadaires_circuit_ref ON lampadaires(circuit_reference) WHERE circuit_reference IS NOT NULL;
 
-		DO $$
-		BEGIN
-			IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_commissioning_status') THEN
-				ALTER TABLE lampadaires ADD CONSTRAINT chk_commissioning_status CHECK (commissioning_status IN ('discovered', 'located', 'configured', 'tested', 'commissioned'));
-			END IF;
-		END $$;
+		-- chk_commissioning_status is fully managed in ensureSchemaV2 (includes 'failed')
 
 		CREATE TABLE IF NOT EXISTS lighting_groups (
 			id SERIAL PRIMARY KEY,

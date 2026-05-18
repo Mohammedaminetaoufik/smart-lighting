@@ -112,6 +112,7 @@ func main() {
 		api.GET("/lampadaires/:id", controllers.HandleGetLampadaireJSON(db))
 		api.POST("/lampadaires/:id/location", controllers.HandleUpdateLampadaireLocation(db))
 		api.POST("/lampadaires/:id/commissioning", controllers.HandleUpdateCommissioningStatus(db))
+		api.POST("/lampadaires/:id/assign-lcu", controllers.HandleAssignLCU(db))
 		api.GET("/lampadaires/:id/diagnostic", controllers.HandleDiagnoseLampadaire(db))
 
 		// Lighting Profiles API
@@ -159,6 +160,7 @@ func main() {
 
 		// Energy API
 		api.GET("/energy/summary", controllers.HandleGetEnergySummary(db))
+		api.GET("/energy/daily", controllers.HandleGetDailyEnergy(db))
 
 		// Simulator API
 		api.POST("/simulator/telemetry/:id", controllers.HandleSimulateTelemetry(db))

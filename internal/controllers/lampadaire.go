@@ -250,6 +250,45 @@ func HandleUpdateCommissioningStatus(db *sql.DB) gin.HandlerFunc {
 	}
 }
 
+// HandleAssignLCU handles POST /api/lampadaires/:id/assign-lcu.
+// Body: { "lcu_id": 5 } or { "lcu_id": null } to unassign.
+func HandleAssignLCU(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, err := ParseIDParam(c, "id")
+		if err != nil {
+			RespondError(c, http.StatusBadRequest, "ID invalide")
+			return
+		}
+		var body struct {
+			LCUID *int `json:"lcu_id"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			RespondError(c, http.StatusBadRequest, "JSON invalide")
+			return
+		}
+		if body.LCUID != nil {
+			var exists bool
+			db.QueryRowContext(c.Request.Context(), `SELECT EXISTS(SELECT 1 FROM lcus WHERE id=$1)`, *body.LCUID).Scan(&exists)
+			if !exists {
+				RespondError(c, http.StatusBadRequest, "LCU introuvable")
+				return
+			}
+			if _, err := db.ExecContext(c.Request.Context(),
+				`UPDATE lampadaires SET lcu_id=$1, updated_at=NOW() WHERE id=$2`, *body.LCUID, id); err != nil {
+				RespondError(c, http.StatusInternalServerError, err.Error())
+				return
+			}
+		} else {
+			if _, err := db.ExecContext(c.Request.Context(),
+				`UPDATE lampadaires SET lcu_id=NULL, updated_at=NOW() WHERE id=$1`, id); err != nil {
+				RespondError(c, http.StatusInternalServerError, err.Error())
+				return
+			}
+		}
+		RespondJSON(c, http.StatusOK, gin.H{"lampadaire_id": id, "lcu_id": body.LCUID})
+	}
+}
+
 // HandleDiagnoseLampadaire handles GET /api/lampadaires/:id/diagnostic.
 func HandleDiagnoseLampadaire(db *sql.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
