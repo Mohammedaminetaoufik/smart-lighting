@@ -121,12 +121,13 @@ func mapDeviceToLampadaire(d models.LcuDeviceDTO, lcuID int, lcuLat, lcuLng *flo
 		commStatus = "located"
 	}
 
-	ctrlStatus := "unknown"
-	ctrlUID := ""
-	if d.ControllerType != "" || d.ControllerEmbedded {
-		ctrlStatus = "ok"
-		ctrlUID = d.DeviceUID + "-CTRL"
+	// Default to Zhaga Book 18 for all discovered devices
+	ctrlType := d.ControllerType
+	if ctrlType == "" {
+		ctrlType = "Zhaga Book 18"
 	}
+	ctrlStatus := "ok"
+	ctrlUID := d.DeviceUID // controller UID == device UID (embedded)
 
 	return models.Lampadaire{
 		Reference:           d.Reference,
@@ -146,14 +147,30 @@ func mapDeviceToLampadaire(d models.LcuDeviceDTO, lcuID int, lcuLat, lcuLng *flo
 		CommissioningStatus: commStatus,
 
 		ControllerUID:           ctrlUID,
-		ControllerType:          d.ControllerType,
+		ControllerType:          ctrlType,
 		ControllerStatus:        ctrlStatus,
 		ControllerSignalQuality: d.ControllerSignalQuality,
 		ControllerFirmware:      d.ControllerFirmware,
-		ControllerEmbedded:      d.ControllerEmbedded,
+		ControllerEmbedded:      true,
 		DimmingEnabled:          d.DimmingEnabled,
 		MeteringEnabled:         d.MeteringEnabled,
 		ArmoireReference:        d.ArmoireReference,
 		CircuitReference:        d.CircuitReference,
+
+		DriverBrand:          d.DriverBrand,
+		DriverModel:          d.DriverModel,
+		DriverProtocol:       d.DriverProtocol,
+		NominalPowerW:        d.NominalPowerW,
+		OutputCurrentMA:      d.OutputCurrentMA,
+		OutputVoltageV:       d.OutputVoltageV,
+		PowerFactor:          d.PowerFactor,
+		SurgeProtection:      d.SurgeProtection,
+		DimmingProtocol:      d.DimmingProtocol,
+		D4ICompatible:        d.D4ICompatible,
+		DriverTemperature:    d.DriverTemperature,
+		LEDModuleTemperature: d.LEDModuleTemperature,
+		EnergyKWh:            d.EnergyKWh,
+		OperatingHours:       d.OperatingHours,
+		FaultStatus:          d.FaultStatus,
 	}
 }

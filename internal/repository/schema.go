@@ -510,6 +510,23 @@ func ensureSchemaV2(db *sql.DB) error {
 			created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 		);
 
+		-- Driver fields for Zhaga Book 18 and other embedded drivers
+		ALTER TABLE lampadaires ADD COLUMN IF NOT EXISTS driver_brand TEXT;
+		ALTER TABLE lampadaires ADD COLUMN IF NOT EXISTS driver_model TEXT;
+		ALTER TABLE lampadaires ADD COLUMN IF NOT EXISTS driver_protocol TEXT;
+		ALTER TABLE lampadaires ADD COLUMN IF NOT EXISTS nominal_power_w INTEGER;
+		ALTER TABLE lampadaires ADD COLUMN IF NOT EXISTS output_current_ma DOUBLE PRECISION;
+		ALTER TABLE lampadaires ADD COLUMN IF NOT EXISTS output_voltage_v DOUBLE PRECISION;
+		ALTER TABLE lampadaires ADD COLUMN IF NOT EXISTS power_factor DOUBLE PRECISION;
+		ALTER TABLE lampadaires ADD COLUMN IF NOT EXISTS surge_protection BOOLEAN NOT NULL DEFAULT false;
+		ALTER TABLE lampadaires ADD COLUMN IF NOT EXISTS dimming_protocol TEXT;
+		ALTER TABLE lampadaires ADD COLUMN IF NOT EXISTS d4i_compatible BOOLEAN NOT NULL DEFAULT false;
+		ALTER TABLE lampadaires ADD COLUMN IF NOT EXISTS driver_temperature DOUBLE PRECISION;
+		ALTER TABLE lampadaires ADD COLUMN IF NOT EXISTS led_module_temperature DOUBLE PRECISION;
+		ALTER TABLE lampadaires ADD COLUMN IF NOT EXISTS energy_kwh DOUBLE PRECISION;
+		ALTER TABLE lampadaires ADD COLUMN IF NOT EXISTS operating_hours DOUBLE PRECISION;
+		ALTER TABLE lampadaires ADD COLUMN IF NOT EXISTS fault_status TEXT NOT NULL DEFAULT 'none';
+
 		CREATE TABLE IF NOT EXISTS alerts_archive (
 			id INTEGER PRIMARY KEY,
 			lampadaire_id INTEGER,

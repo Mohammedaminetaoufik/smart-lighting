@@ -44,6 +44,23 @@ type Lampadaire struct {
 	CircuitReference        string  `json:"circuit_reference,omitempty"`
 	CabinetID               *int    `json:"cabinet_id,omitempty"`
 	CircuitID               *int    `json:"circuit_id,omitempty"`
+
+	// Driver fields — populated from Zhaga Book 18 interface during LCU sync
+	DriverBrand          string   `json:"driver_brand,omitempty"`
+	DriverModel          string   `json:"driver_model,omitempty"`
+	DriverProtocol       string   `json:"driver_protocol,omitempty"`
+	NominalPowerW        *int     `json:"nominal_power_w,omitempty"`
+	OutputCurrentMA      *float64 `json:"output_current_ma,omitempty"`
+	OutputVoltageV       *float64 `json:"output_voltage_v,omitempty"`
+	PowerFactor          *float64 `json:"power_factor,omitempty"`
+	SurgeProtection      bool     `json:"surge_protection"`
+	DimmingProtocol      string   `json:"dimming_protocol,omitempty"`
+	D4ICompatible        bool     `json:"d4i_compatible"`
+	DriverTemperature    *float64 `json:"driver_temperature,omitempty"`
+	LEDModuleTemperature *float64 `json:"led_module_temperature,omitempty"`
+	EnergyKWh            *float64 `json:"energy_kwh,omitempty"`
+	OperatingHours       *float64 `json:"operating_hours,omitempty"`
+	FaultStatus          string   `json:"fault_status,omitempty"`
 }
 
 // FormData holds HTML form input for creating/editing a lampadaire.

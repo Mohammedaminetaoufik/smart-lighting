@@ -43,6 +43,9 @@ func (a *MockLCUAdapter) Health(ctx context.Context, lcu *models.LCU) error {
 func (a *MockLCUAdapter) DiscoverDevices(ctx context.Context, lcu *models.LCU) ([]models.LcuDeviceDTO, error) {
 	time.Sleep(500 * time.Millisecond)
 
+	driverBrands := []string{"Tridonic", "Helvar", "Osram", "Inventronics"}
+	driverModels := []string{"LCA 50W 150V", "LCAI 50W 900mA", "OTi 50/220-240/1A4", "EUM050S070DK"}
+
 	count := 5 + rand.Intn(4) // 5 to 8 devices
 	devices := make([]models.LcuDeviceDTO, count)
 
@@ -51,33 +54,56 @@ func (a *MockLCUAdapter) DiscoverDevices(ctx context.Context, lcu *models.LCU) (
 		ref := fmt.Sprintf("LP-%03d", i+1)
 		node := fmt.Sprintf("0x%02X", i+1)
 
-		puissance := 100 + rand.Intn(50)
-		signalQuality := 60 + rand.Intn(40) // 60-99%
-		controllerEmbedded := (i % 5) != 0  // 4 out of 5 have a controller
+		puissance := 50 + rand.Intn(100)
+		signalQuality := 60 + rand.Intn(40)
 		armoireRef := fmt.Sprintf("ARM-%s", lcu.Reference)
 		circuitRef := fmt.Sprintf("CIR-%02d", (i%2)+1)
+
+		nomPower := puissance
+		outCurrent := 350.0 + float64(rand.Intn(650))
+		outVoltage := 48.0 + float64(rand.Intn(52))
+		pf := 0.90 + rand.Float64()*0.09
+		drvTemp := 35.0 + rand.Float64()*25.0
+		ledTemp := 40.0 + rand.Float64()*30.0
+		opHours := float64(rand.Intn(8760))
+		faultOptions := []string{"none", "none", "none", "none", "overtemp"}
 
 		d := models.LcuDeviceDTO{
 			DeviceUID:        uid,
 			Reference:        ref,
 			NodeAddress:      node,
 			Zone:             lcu.Zone,
-			TypeDriver:       "DALI",
+			TypeDriver:       "DALI-2",
 			Protocole:        "ZigBee",
 			Puissance:        &puissance,
 			Etat:             "online",
 			Intensite:        70,
 			DimmingEnabled:   true,
-			MeteringEnabled:  rand.Intn(2) == 0,
+			MeteringEnabled:  true,
 			ArmoireReference: armoireRef,
 			CircuitReference: circuitRef,
-		}
 
-		if controllerEmbedded {
-			d.ControllerType = "NLC-200"
-			d.ControllerFirmware = fmt.Sprintf("v2.%d.%d", rand.Intn(5), rand.Intn(10))
-			d.ControllerSignalQuality = &signalQuality
-			d.ControllerEmbedded = true
+			// All devices have Zhaga Book 18 embedded controller
+			ControllerType:          "Zhaga Book 18",
+			ControllerFirmware:      fmt.Sprintf("v3.%d.%d", rand.Intn(5), rand.Intn(10)),
+			ControllerSignalQuality: &signalQuality,
+			ControllerEmbedded:      true,
+
+			// Driver technical data
+			DriverBrand:          driverBrands[i%len(driverBrands)],
+			DriverModel:          driverModels[i%len(driverModels)],
+			DriverProtocol:       "DALI-2",
+			NominalPowerW:        &nomPower,
+			OutputCurrentMA:      &outCurrent,
+			OutputVoltageV:       &outVoltage,
+			PowerFactor:          &pf,
+			SurgeProtection:      true,
+			DimmingProtocol:      "DALI",
+			D4ICompatible:        true,
+			DriverTemperature:    &drvTemp,
+			LEDModuleTemperature: &ledTemp,
+			OperatingHours:       &opHours,
+			FaultStatus:          faultOptions[rand.Intn(len(faultOptions))],
 		}
 
 		if i < count-2 {

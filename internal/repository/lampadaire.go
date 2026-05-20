@@ -20,7 +20,11 @@ func GetLampadaireByID(ctx context.Context, db *sql.DB, id int) (*models.Lampada
 			controller_uid, controller_type, controller_status, controller_signal_quality,
 			controller_firmware, controller_last_seen_at, controller_embedded,
 			dimming_enabled, metering_enabled, armoire_reference, circuit_reference,
-			cabinet_id, circuit_id
+			cabinet_id, circuit_id,
+			driver_brand, driver_model, driver_protocol, nominal_power_w,
+			output_current_ma, output_voltage_v, power_factor, surge_protection,
+			dimming_protocol, d4i_compatible, driver_temperature, led_module_temperature,
+			energy_kwh, operating_hours, fault_status
 		FROM lampadaires
 		WHERE id = $1 AND archived_at IS NULL
 	`, id)
@@ -42,6 +46,11 @@ func scanLampadaireSingle(row *sql.Row) (*models.Lampadaire, error) {
 	var ctrlEmbedded, dimmingEnabled, meteringEnabled sql.NullBool
 	var armoireRef, circuitRef sql.NullString
 
+	var drvBrand, drvModel, drvProtocol, dimmingProto, faultStatus sql.NullString
+	var nomPowerW sql.NullInt64
+	var outCurrentMA, outVoltageV, powerFactor, drvTemp, ledTemp, energyKWh, opHours sql.NullFloat64
+	var surgeProt, d4iCompat sql.NullBool
+
 	err := row.Scan(
 		&item.ID, &item.Reference, &lat, &lng,
 		&zone, &typeDriver, &protocole, &puissance,
@@ -53,6 +62,10 @@ func scanLampadaireSingle(row *sql.Row) (*models.Lampadaire, error) {
 		&ctrlFirmware, &ctrlLastSeen, &ctrlEmbedded,
 		&dimmingEnabled, &meteringEnabled, &armoireRef, &circuitRef,
 		&cabID, &circID,
+		&drvBrand, &drvModel, &drvProtocol, &nomPowerW,
+		&outCurrentMA, &outVoltageV, &powerFactor, &surgeProt,
+		&dimmingProto, &d4iCompat, &drvTemp, &ledTemp,
+		&energyKWh, &opHours, &faultStatus,
 	)
 	if err != nil {
 		return nil, err
@@ -60,6 +73,7 @@ func scanLampadaireSingle(row *sql.Row) (*models.Lampadaire, error) {
 
 	populateLampadaireFields(&item, lat, lng, zone, typeDriver, protocole, puissance, lcuID, dateInstallation, lastSeenAt, lastCommandAt, address, quartier, lcuReference, driverReference, notes, deviceUID, nodeAddress)
 	populateControllerFields(&item, ctrlUID, ctrlType, ctrlStatus, ctrlFirmware, ctrlSignal, cabID, circID, ctrlLastSeen, ctrlEmbedded, dimmingEnabled, meteringEnabled, armoireRef, circuitRef)
+	populateDriverFields(&item, drvBrand, drvModel, drvProtocol, dimmingProto, faultStatus, nomPowerW, outCurrentMA, outVoltageV, powerFactor, drvTemp, ledTemp, energyKWh, opHours, surgeProt, d4iCompat)
 	return &item, nil
 }
 
@@ -174,6 +188,60 @@ func populateControllerFields(item *models.Lampadaire,
 	}
 }
 
+func populateDriverFields(item *models.Lampadaire,
+	drvBrand, drvModel, drvProtocol, dimmingProto, faultStatus sql.NullString,
+	nomPowerW sql.NullInt64,
+	outCurrentMA, outVoltageV, powerFactor, drvTemp, ledTemp, energyKWh, opHours sql.NullFloat64,
+	surgeProt, d4iCompat sql.NullBool,
+) {
+	if drvBrand.Valid {
+		item.DriverBrand = drvBrand.String
+	}
+	if drvModel.Valid {
+		item.DriverModel = drvModel.String
+	}
+	if drvProtocol.Valid {
+		item.DriverProtocol = drvProtocol.String
+	}
+	if dimmingProto.Valid {
+		item.DimmingProtocol = dimmingProto.String
+	}
+	if faultStatus.Valid {
+		item.FaultStatus = faultStatus.String
+	}
+	if nomPowerW.Valid {
+		v := int(nomPowerW.Int64)
+		item.NominalPowerW = &v
+	}
+	if outCurrentMA.Valid {
+		item.OutputCurrentMA = &outCurrentMA.Float64
+	}
+	if outVoltageV.Valid {
+		item.OutputVoltageV = &outVoltageV.Float64
+	}
+	if powerFactor.Valid {
+		item.PowerFactor = &powerFactor.Float64
+	}
+	if drvTemp.Valid {
+		item.DriverTemperature = &drvTemp.Float64
+	}
+	if ledTemp.Valid {
+		item.LEDModuleTemperature = &ledTemp.Float64
+	}
+	if energyKWh.Valid {
+		item.EnergyKWh = &energyKWh.Float64
+	}
+	if opHours.Valid {
+		item.OperatingHours = &opHours.Float64
+	}
+	if surgeProt.Valid {
+		item.SurgeProtection = surgeProt.Bool
+	}
+	if d4iCompat.Valid {
+		item.D4ICompatible = d4iCompat.Bool
+	}
+}
+
 // ListLampadaires returns all non-archived lampadaires matching optional filters.
 func ListLampadaires(ctx context.Context, db *sql.DB, search map[string]string) ([]models.Lampadaire, error) {
 	archivedOnly := search["archived"] == "1"
@@ -215,6 +283,10 @@ func ListLampadaires(ctx context.Context, db *sql.DB, search map[string]string) 
 			l.controller_firmware, l.controller_last_seen_at, l.controller_embedded,
 			l.dimming_enabled, l.metering_enabled, l.armoire_reference, l.circuit_reference,
 			l.cabinet_id, l.circuit_id,
+			l.driver_brand, l.driver_model, l.driver_protocol, l.nominal_power_w,
+			l.output_current_ma, l.output_voltage_v, l.power_factor, l.surge_protection,
+			l.dimming_protocol, l.d4i_compatible, l.driver_temperature, l.led_module_temperature,
+			l.energy_kwh, l.operating_hours, l.fault_status,
 			EXISTS(SELECT 1 FROM alerts a WHERE a.lampadaire_id = l.id AND a.status = 'open' AND a.severity = 'critical') as has_alert
 		FROM lampadaires l
 		WHERE ` + strings.Join(where, " AND ") + `
@@ -242,6 +314,11 @@ func ListLampadaires(ctx context.Context, db *sql.DB, search map[string]string) 
 		var ctrlEmbedded, dimmingEnabled, meteringEnabled sql.NullBool
 		var armoireRef, circuitRef sql.NullString
 
+		var drvBrand, drvModel, drvProtocol, dimmingProto, faultStatus sql.NullString
+		var nomPowerW sql.NullInt64
+		var outCurrentMA, outVoltageV, powerFactor, drvTemp, ledTemp, energyKWh, opHours sql.NullFloat64
+		var surgeProt, d4iCompat sql.NullBool
+
 		if err := rows.Scan(
 			&item.ID, &item.Reference, &lat, &lng,
 			&zone, &typeDriver, &protocole, &puissance,
@@ -253,6 +330,10 @@ func ListLampadaires(ctx context.Context, db *sql.DB, search map[string]string) 
 			&ctrlFirmware, &ctrlLastSeen, &ctrlEmbedded,
 			&dimmingEnabled, &meteringEnabled, &armoireRef, &circuitRef,
 			&cabID, &circID,
+			&drvBrand, &drvModel, &drvProtocol, &nomPowerW,
+			&outCurrentMA, &outVoltageV, &powerFactor, &surgeProt,
+			&dimmingProto, &d4iCompat, &drvTemp, &ledTemp,
+			&energyKWh, &opHours, &faultStatus,
 			&item.HasCriticalAlert,
 		); err != nil {
 			return nil, err
@@ -260,6 +341,7 @@ func ListLampadaires(ctx context.Context, db *sql.DB, search map[string]string) 
 
 		populateLampadaireFields(&item, lat, lng, zone, typeDriver, protocole, puissance, lcuID, dateInstallation, lastSeenAt, lastCommandAt, address, quartier, lcuReference, driverReference, notes, deviceUID, nodeAddress)
 		populateControllerFields(&item, ctrlUID, ctrlType, ctrlStatus, ctrlFirmware, ctrlSignal, cabID, circID, ctrlLastSeen, ctrlEmbedded, dimmingEnabled, meteringEnabled, armoireRef, circuitRef)
+		populateDriverFields(&item, drvBrand, drvModel, drvProtocol, dimmingProto, faultStatus, nomPowerW, outCurrentMA, outVoltageV, powerFactor, drvTemp, ledTemp, energyKWh, opHours, surgeProt, d4iCompat)
 		result = append(result, item)
 	}
 
@@ -280,10 +362,15 @@ func InsertLampadaire(ctx context.Context, db *sql.DB, l models.Lampadaire) erro
 			location_status, commissioning_status,
 			controller_uid, controller_type, controller_status, controller_signal_quality,
 			controller_firmware, controller_embedded, dimming_enabled, metering_enabled,
-			armoire_reference, circuit_reference, cabinet_id, circuit_id
+			armoire_reference, circuit_reference, cabinet_id, circuit_id,
+			driver_brand, driver_model, driver_protocol, nominal_power_w,
+			output_current_ma, output_voltage_v, power_factor, surge_protection,
+			dimming_protocol, d4i_compatible, driver_temperature, led_module_temperature,
+			energy_kwh, operating_hours, fault_status
 		) VALUES (
 			$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,
-			$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33
+			$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,
+			$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45,$46,$47,$48
 		)
 	`,
 		l.Reference, l.Latitude, l.Longitude,
@@ -299,6 +386,12 @@ func InsertLampadaire(ctx context.Context, db *sql.DB, l models.Lampadaire) erro
 		l.DimmingEnabled, l.MeteringEnabled,
 		utils.NullString(l.ArmoireReference), utils.NullString(l.CircuitReference),
 		l.CabinetID, l.CircuitID,
+		utils.NullString(l.DriverBrand), utils.NullString(l.DriverModel),
+		utils.NullString(l.DriverProtocol), l.NominalPowerW,
+		l.OutputCurrentMA, l.OutputVoltageV, l.PowerFactor, l.SurgeProtection,
+		utils.NullString(l.DimmingProtocol), l.D4ICompatible,
+		l.DriverTemperature, l.LEDModuleTemperature,
+		l.EnergyKWh, l.OperatingHours, utils.NullString(l.FaultStatus),
 	)
 	return err
 }
@@ -313,10 +406,15 @@ func InsertLampadaireTx(ctx context.Context, tx *sql.Tx, l models.Lampadaire) er
 			location_status, commissioning_status,
 			controller_uid, controller_type, controller_status, controller_signal_quality,
 			controller_firmware, controller_embedded, dimming_enabled, metering_enabled,
-			armoire_reference, circuit_reference, cabinet_id, circuit_id
+			armoire_reference, circuit_reference, cabinet_id, circuit_id,
+			driver_brand, driver_model, driver_protocol, nominal_power_w,
+			output_current_ma, output_voltage_v, power_factor, surge_protection,
+			dimming_protocol, d4i_compatible, driver_temperature, led_module_temperature,
+			energy_kwh, operating_hours, fault_status
 		) VALUES (
 			$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,
-			$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33
+			$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,
+			$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45,$46,$47,$48
 		)
 	`,
 		l.Reference, l.Latitude, l.Longitude,
@@ -332,6 +430,12 @@ func InsertLampadaireTx(ctx context.Context, tx *sql.Tx, l models.Lampadaire) er
 		l.DimmingEnabled, l.MeteringEnabled,
 		utils.NullString(l.ArmoireReference), utils.NullString(l.CircuitReference),
 		l.CabinetID, l.CircuitID,
+		utils.NullString(l.DriverBrand), utils.NullString(l.DriverModel),
+		utils.NullString(l.DriverProtocol), l.NominalPowerW,
+		l.OutputCurrentMA, l.OutputVoltageV, l.PowerFactor, l.SurgeProtection,
+		utils.NullString(l.DimmingProtocol), l.D4ICompatible,
+		l.DriverTemperature, l.LEDModuleTemperature,
+		l.EnergyKWh, l.OperatingHours, utils.NullString(l.FaultStatus),
 	)
 	return err
 }
@@ -377,7 +481,7 @@ func UpdateLampadaire(ctx context.Context, db *sql.DB, l models.Lampadaire) erro
 }
 
 // UpdateLampadaireTx updates all fields of a lampadaire within a transaction,
-// including controller fields. Used exclusively by the LCU sync service.
+// including controller and driver fields. Used exclusively by the LCU sync service.
 func UpdateLampadaireTx(ctx context.Context, tx *sql.Tx, l models.Lampadaire) error {
 	_, err := tx.ExecContext(ctx, `
 		UPDATE lampadaires
@@ -414,8 +518,23 @@ func UpdateLampadaireTx(ctx context.Context, tx *sql.Tx, l models.Lampadaire) er
 			circuit_reference = $31,
 			cabinet_id = $32,
 			circuit_id = $33,
+			driver_brand = $34,
+			driver_model = $35,
+			driver_protocol = $36,
+			nominal_power_w = $37,
+			output_current_ma = $38,
+			output_voltage_v = $39,
+			power_factor = $40,
+			surge_protection = $41,
+			dimming_protocol = $42,
+			d4i_compatible = $43,
+			driver_temperature = $44,
+			led_module_temperature = $45,
+			energy_kwh = $46,
+			operating_hours = $47,
+			fault_status = $48,
 			updated_at = NOW()
-		WHERE id = $34
+		WHERE id = $49
 	`,
 		l.Reference, l.Latitude, l.Longitude,
 		utils.NullString(l.Zone), utils.NullString(l.TypeDriver), utils.NullString(l.Protocole),
@@ -429,6 +548,12 @@ func UpdateLampadaireTx(ctx context.Context, tx *sql.Tx, l models.Lampadaire) er
 		l.DimmingEnabled, l.MeteringEnabled,
 		utils.NullString(l.ArmoireReference), utils.NullString(l.CircuitReference),
 		l.CabinetID, l.CircuitID,
+		utils.NullString(l.DriverBrand), utils.NullString(l.DriverModel),
+		utils.NullString(l.DriverProtocol), l.NominalPowerW,
+		l.OutputCurrentMA, l.OutputVoltageV, l.PowerFactor, l.SurgeProtection,
+		utils.NullString(l.DimmingProtocol), l.D4ICompatible,
+		l.DriverTemperature, l.LEDModuleTemperature,
+		l.EnergyKWh, l.OperatingHours, utils.NullString(l.FaultStatus),
 		l.ID,
 	)
 	return err
@@ -445,6 +570,10 @@ func ListLampadairesMissingLocation(ctx context.Context, db *sql.DB) ([]models.L
 			l.controller_firmware, l.controller_last_seen_at, l.controller_embedded,
 			l.dimming_enabled, l.metering_enabled, l.armoire_reference, l.circuit_reference,
 			l.cabinet_id, l.circuit_id,
+			l.driver_brand, l.driver_model, l.driver_protocol, l.nominal_power_w,
+			l.output_current_ma, l.output_voltage_v, l.power_factor, l.surge_protection,
+			l.dimming_protocol, l.d4i_compatible, l.driver_temperature, l.led_module_temperature,
+			l.energy_kwh, l.operating_hours, l.fault_status,
 			EXISTS(SELECT 1 FROM alerts a WHERE a.lampadaire_id = l.id AND a.status = 'open' AND a.severity = 'critical') as has_alert
 		FROM lampadaires l
 		WHERE (l.location_status = 'missing' OR l.latitude = 0 AND l.longitude = 0) AND l.archived_at IS NULL
@@ -471,6 +600,11 @@ func ListLampadairesMissingLocation(ctx context.Context, db *sql.DB) ([]models.L
 		var ctrlEmbedded, dimmingEnabled, meteringEnabled sql.NullBool
 		var armoireRef, circuitRef sql.NullString
 
+		var drvBrand, drvModel, drvProtocol, dimmingProto, faultStatus sql.NullString
+		var nomPowerW sql.NullInt64
+		var outCurrentMA, outVoltageV, powerFactor, drvTemp, ledTemp, energyKWh, opHours sql.NullFloat64
+		var surgeProt, d4iCompat sql.NullBool
+
 		if err := rows.Scan(
 			&item.ID, &item.Reference, &lat, &lng,
 			&zone, &typeDriver, &protocole, &puissance,
@@ -482,6 +616,10 @@ func ListLampadairesMissingLocation(ctx context.Context, db *sql.DB) ([]models.L
 			&ctrlFirmware, &ctrlLastSeen, &ctrlEmbedded,
 			&dimmingEnabled, &meteringEnabled, &armoireRef, &circuitRef,
 			&cabID, &circID,
+			&drvBrand, &drvModel, &drvProtocol, &nomPowerW,
+			&outCurrentMA, &outVoltageV, &powerFactor, &surgeProt,
+			&dimmingProto, &d4iCompat, &drvTemp, &ledTemp,
+			&energyKWh, &opHours, &faultStatus,
 			&item.HasCriticalAlert,
 		); err != nil {
 			return nil, err
@@ -489,6 +627,7 @@ func ListLampadairesMissingLocation(ctx context.Context, db *sql.DB) ([]models.L
 
 		populateLampadaireFields(&item, lat, lng, zone, typeDriver, protocole, puissance, lid, dateInstallation, lastSeenAt, lastCommandAt, address, quartier, lcuReference, driverReference, notes, deviceUID, nodeAddress)
 		populateControllerFields(&item, ctrlUID, ctrlType, ctrlStatus, ctrlFirmware, ctrlSignal, cabID, circID, ctrlLastSeen, ctrlEmbedded, dimmingEnabled, meteringEnabled, armoireRef, circuitRef)
+		populateDriverFields(&item, drvBrand, drvModel, drvProtocol, dimmingProto, faultStatus, nomPowerW, outCurrentMA, outVoltageV, powerFactor, drvTemp, ledTemp, energyKWh, opHours, surgeProt, d4iCompat)
 		result = append(result, item)
 	}
 	return result, nil
@@ -505,6 +644,10 @@ func ListLampadairesByLCU(ctx context.Context, db *sql.DB, lcuID int) ([]models.
 			l.controller_firmware, l.controller_last_seen_at, l.controller_embedded,
 			l.dimming_enabled, l.metering_enabled, l.armoire_reference, l.circuit_reference,
 			l.cabinet_id, l.circuit_id,
+			l.driver_brand, l.driver_model, l.driver_protocol, l.nominal_power_w,
+			l.output_current_ma, l.output_voltage_v, l.power_factor, l.surge_protection,
+			l.dimming_protocol, l.d4i_compatible, l.driver_temperature, l.led_module_temperature,
+			l.energy_kwh, l.operating_hours, l.fault_status,
 			EXISTS(SELECT 1 FROM alerts a WHERE a.lampadaire_id = l.id AND a.status = 'open' AND a.severity = 'critical') as has_alert
 		FROM lampadaires l
 		WHERE l.lcu_id = $1 AND l.archived_at IS NULL
@@ -531,6 +674,11 @@ func ListLampadairesByLCU(ctx context.Context, db *sql.DB, lcuID int) ([]models.
 		var ctrlEmbedded, dimmingEnabled, meteringEnabled sql.NullBool
 		var armoireRef, circuitRef sql.NullString
 
+		var drvBrand, drvModel, drvProtocol, dimmingProto, faultStatus sql.NullString
+		var nomPowerW sql.NullInt64
+		var outCurrentMA, outVoltageV, powerFactor, drvTemp, ledTemp, energyKWh, opHours sql.NullFloat64
+		var surgeProt, d4iCompat sql.NullBool
+
 		if err := rows.Scan(
 			&item.ID, &item.Reference, &lat, &lng,
 			&zone, &typeDriver, &protocole, &puissance,
@@ -542,6 +690,10 @@ func ListLampadairesByLCU(ctx context.Context, db *sql.DB, lcuID int) ([]models.
 			&ctrlFirmware, &ctrlLastSeen, &ctrlEmbedded,
 			&dimmingEnabled, &meteringEnabled, &armoireRef, &circuitRef,
 			&cabID, &circID,
+			&drvBrand, &drvModel, &drvProtocol, &nomPowerW,
+			&outCurrentMA, &outVoltageV, &powerFactor, &surgeProt,
+			&dimmingProto, &d4iCompat, &drvTemp, &ledTemp,
+			&energyKWh, &opHours, &faultStatus,
 			&item.HasCriticalAlert,
 		); err != nil {
 			return nil, err
@@ -549,6 +701,7 @@ func ListLampadairesByLCU(ctx context.Context, db *sql.DB, lcuID int) ([]models.
 
 		populateLampadaireFields(&item, lat, lng, zone, typeDriver, protocole, puissance, lid, dateInstallation, lastSeenAt, lastCommandAt, address, quartier, lcuReference, driverReference, notes, deviceUID, nodeAddress)
 		populateControllerFields(&item, ctrlUID, ctrlType, ctrlStatus, ctrlFirmware, ctrlSignal, cabID, circID, ctrlLastSeen, ctrlEmbedded, dimmingEnabled, meteringEnabled, armoireRef, circuitRef)
+		populateDriverFields(&item, drvBrand, drvModel, drvProtocol, dimmingProto, faultStatus, nomPowerW, outCurrentMA, outVoltageV, powerFactor, drvTemp, ledTemp, energyKWh, opHours, surgeProt, d4iCompat)
 		result = append(result, item)
 	}
 	return result, nil

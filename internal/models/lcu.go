@@ -59,6 +59,23 @@ type LcuDeviceDTO struct {
 	MeteringEnabled         bool   `json:"metering_enabled"`
 	ArmoireReference        string `json:"armoire_reference,omitempty"`
 	CircuitReference        string `json:"circuit_reference,omitempty"`
+
+	// Driver data reported via Zhaga Book 18 interface
+	DriverBrand          string   `json:"driver_brand,omitempty"`
+	DriverModel          string   `json:"driver_model,omitempty"`
+	DriverProtocol       string   `json:"driver_protocol,omitempty"`
+	NominalPowerW        *int     `json:"nominal_power_w,omitempty"`
+	OutputCurrentMA      *float64 `json:"output_current_ma,omitempty"`
+	OutputVoltageV       *float64 `json:"output_voltage_v,omitempty"`
+	PowerFactor          *float64 `json:"power_factor,omitempty"`
+	SurgeProtection      bool     `json:"surge_protection"`
+	DimmingProtocol      string   `json:"dimming_protocol,omitempty"`
+	D4ICompatible        bool     `json:"d4i_compatible"`
+	DriverTemperature    *float64 `json:"driver_temperature,omitempty"`
+	LEDModuleTemperature *float64 `json:"led_module_temperature,omitempty"`
+	EnergyKWh            *float64 `json:"energy_kwh,omitempty"`
+	OperatingHours       *float64 `json:"operating_hours,omitempty"`
+	FaultStatus          string   `json:"fault_status,omitempty"`
 }
 
 // LCUSyncLog represents a log entry for an LCU synchronization process.
