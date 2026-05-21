@@ -266,7 +266,14 @@ func main() {
 
 		// Maintenance Windows
 		api.GET("/maintenance-windows", controllers.HandleGetMaintenanceWindows(db))
+		api.GET("/maintenance-windows/active", controllers.HandleGetActiveMaintenanceWindows(db))
+		api.GET("/maintenance-windows/upcoming", controllers.HandleGetUpcomingMaintenanceWindows(db))
+		api.GET("/maintenance-windows/check", controllers.HandleCheckMaintenance(db))
 		api.POST("/maintenance-windows", controllers.HandleCreateMaintenanceWindow(db))
+		api.GET("/maintenance-windows/:id", controllers.HandleGetMaintenanceWindow(db))
+		api.PUT("/maintenance-windows/:id", controllers.HandleUpdateMaintenanceWindow(db))
+		api.POST("/maintenance-windows/:id/cancel", controllers.HandleCancelMaintenanceWindow(db))
+		api.POST("/maintenance-windows/:id/complete", controllers.HandleCompleteMaintenanceWindow(db))
 		api.DELETE("/maintenance-windows/:id", controllers.HandleDeleteMaintenanceWindow(db))
 
 		// CSV import

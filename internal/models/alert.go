@@ -20,7 +20,9 @@ type Alert struct {
 	AcknowledgedAt    *time.Time `json:"acknowledged_at,omitempty"`
 	ResolvedAt        *time.Time `json:"resolved_at,omitempty"`
 	ClosedAt          *time.Time `json:"closed_at,omitempty"`
-	Reference         string     `json:"reference,omitempty"`
-	LCUID             *int       `json:"lcu_id,omitempty"`
-	Zone              string     `json:"zone,omitempty"`
+	Reference           string     `json:"reference,omitempty"`
+	LCUID               *int       `json:"lcu_id,omitempty"`
+	Zone                string     `json:"zone,omitempty"`
+	MaintenanceRelated  bool       `json:"maintenance_related,omitempty"`
+	MaintenanceWindowID *int       `json:"maintenance_window_id,omitempty"`
 }

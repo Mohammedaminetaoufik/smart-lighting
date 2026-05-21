@@ -448,13 +448,13 @@ func ensureSchemaV2(db *sql.DB) error {
 			id SERIAL PRIMARY KEY,
 			zone TEXT,
 			lampadaire_ids JSONB,
-			starts_at TIMESTAMP WITH TIME ZONE NOT NULL,
-			ends_at TIMESTAMP WITH TIME ZONE NOT NULL,
+			start_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+			end_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
 			reason TEXT,
 			created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
 			created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 		);
-		CREATE INDEX IF NOT EXISTS idx_maintenance_active ON maintenance_windows(starts_at, ends_at);
+		CREATE INDEX IF NOT EXISTS idx_maintenance_active ON maintenance_windows(start_at, end_at);
 
 		-- Users auth extensions (Tier 1)
 		ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP WITH TIME ZONE;
@@ -502,9 +502,9 @@ func ensureSchemaV2(db *sql.DB) error {
 		CREATE TABLE IF NOT EXISTS maintenance_windows (
 			id SERIAL PRIMARY KEY,
 			zone TEXT,
-			lampadaire_ids INTEGER[],
-			starts_at TIMESTAMP WITH TIME ZONE NOT NULL,
-			ends_at TIMESTAMP WITH TIME ZONE NOT NULL,
+			lampadaire_ids JSONB,
+			start_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+			end_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
 			reason TEXT,
 			created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
 			created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
@@ -665,6 +665,67 @@ func ensureSchemaV4(db *sql.DB) error {
 		CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id);
 		CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at DESC);
 		CREATE INDEX IF NOT EXISTS idx_audit_logs_status ON audit_logs(status);
+	`)
+	if err != nil {
+		return err
+	}
+	return ensureSchemaV5(db)
+}
+
+func ensureSchemaV5(db *sql.DB) error {
+	_, err := db.Exec(`
+		-- Maintenance windows: extend with rich fields
+		ALTER TABLE maintenance_windows ADD COLUMN IF NOT EXISTS title TEXT;
+		ALTER TABLE maintenance_windows ADD COLUMN IF NOT EXISTS maintenance_type TEXT NOT NULL DEFAULT 'preventive';
+		ALTER TABLE maintenance_windows ADD COLUMN IF NOT EXISTS target_type TEXT NOT NULL DEFAULT 'zone';
+		ALTER TABLE maintenance_windows ADD COLUMN IF NOT EXISTS target_id INTEGER;
+		ALTER TABLE maintenance_windows ADD COLUMN IF NOT EXISTS target_reference TEXT;
+		ALTER TABLE maintenance_windows ADD COLUMN IF NOT EXISTS impact_level TEXT NOT NULL DEFAULT 'low';
+		ALTER TABLE maintenance_windows ADD COLUMN IF NOT EXISTS suppress_alerts BOOLEAN NOT NULL DEFAULT false;
+		ALTER TABLE maintenance_windows ADD COLUMN IF NOT EXISTS suppress_auto_work_orders BOOLEAN NOT NULL DEFAULT false;
+		ALTER TABLE maintenance_windows ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'planned';
+		ALTER TABLE maintenance_windows ADD COLUMN IF NOT EXISTS related_work_order_id INTEGER REFERENCES work_orders(id) ON DELETE SET NULL;
+		ALTER TABLE maintenance_windows ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW();
+		ALTER TABLE maintenance_windows ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMP WITH TIME ZONE;
+		ALTER TABLE maintenance_windows ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP WITH TIME ZONE;
+		ALTER TABLE maintenance_windows ADD COLUMN IF NOT EXISTS create_work_order BOOLEAN NOT NULL DEFAULT false;
+
+		-- Rename starts_at/ends_at to start_at/end_at if not already done
+		DO $$
+		BEGIN
+			IF EXISTS (SELECT 1 FROM information_schema.columns
+					   WHERE table_name='maintenance_windows' AND column_name='starts_at')
+			   AND NOT EXISTS (SELECT 1 FROM information_schema.columns
+					   WHERE table_name='maintenance_windows' AND column_name='start_at') THEN
+				ALTER TABLE maintenance_windows RENAME COLUMN starts_at TO start_at;
+			END IF;
+			IF EXISTS (SELECT 1 FROM information_schema.columns
+					   WHERE table_name='maintenance_windows' AND column_name='ends_at')
+			   AND NOT EXISTS (SELECT 1 FROM information_schema.columns
+					   WHERE table_name='maintenance_windows' AND column_name='end_at') THEN
+				ALTER TABLE maintenance_windows RENAME COLUMN ends_at TO end_at;
+			END IF;
+		END $$;
+
+		-- Alerts: flag maintenance-related alerts
+		ALTER TABLE alerts ADD COLUMN IF NOT EXISTS maintenance_related BOOLEAN NOT NULL DEFAULT false;
+		ALTER TABLE alerts ADD COLUMN IF NOT EXISTS maintenance_window_id INTEGER REFERENCES maintenance_windows(id) ON DELETE SET NULL;
+
+		-- Work orders: link to maintenance window
+		ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS maintenance_window_id INTEGER REFERENCES maintenance_windows(id) ON DELETE SET NULL;
+		DO $$
+		BEGIN
+			IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_work_order_source_v3') THEN
+				ALTER TABLE work_orders DROP CONSTRAINT IF EXISTS chk_work_order_source_v2;
+				ALTER TABLE work_orders ADD CONSTRAINT chk_work_order_source_v3
+					CHECK (source_type IN ('alert', 'manual', 'system', 'calculator', 'maintenance_window'));
+			END IF;
+		END $$;
+
+		CREATE INDEX IF NOT EXISTS idx_maintenance_status ON maintenance_windows(status);
+		CREATE INDEX IF NOT EXISTS idx_maintenance_start ON maintenance_windows(start_at);
+		CREATE INDEX IF NOT EXISTS idx_maintenance_end ON maintenance_windows(end_at);
+		CREATE INDEX IF NOT EXISTS idx_alerts_maintenance ON alerts(maintenance_window_id) WHERE maintenance_window_id IS NOT NULL;
 	`)
 	return err
 }
