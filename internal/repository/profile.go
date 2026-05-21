@@ -88,6 +88,27 @@ func InsertLightingProfile(db *sql.DB, p *models.LightingProfile) error {
 	return tx.Commit()
 }
 
+// UpdateLightingProfile replaces a profile's metadata and schedules.
+func UpdateLightingProfile(db *sql.DB, p *models.LightingProfile) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err = tx.Exec("UPDATE lighting_profiles SET name=$1, description=$2, target_type=$3, target_value=$4, enabled=$5, updated_at=NOW() WHERE id=$6",
+		p.Name, p.Description, p.TargetType, p.TargetValue, p.Enabled, p.ID); err != nil {
+		return err
+	}
+	tx.Exec("DELETE FROM lighting_profile_schedules WHERE profile_id=$1", p.ID)
+	for _, s := range p.Schedules {
+		if _, err = tx.Exec("INSERT INTO lighting_profile_schedules (profile_id, start_time, end_time, intensity, days_of_week) VALUES ($1,$2,$3,$4,$5)",
+			p.ID, s.StartTime, s.EndTime, s.Intensity, s.DaysOfWeek); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 // NullStringDB returns nil for empty string to be used in DB queries.
 func NullStringDB(value string) interface{} {
 	if value == "" {

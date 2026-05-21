@@ -24,7 +24,8 @@ func GetLampadaireByID(ctx context.Context, db *sql.DB, id int) (*models.Lampada
 			driver_brand, driver_model, driver_protocol, nominal_power_w,
 			output_current_ma, output_voltage_v, power_factor, surge_protection,
 			dimming_protocol, d4i_compatible, driver_temperature, led_module_temperature,
-			energy_kwh, operating_hours, fault_status
+			energy_kwh, operating_hours, fault_status,
+			commissioning_notes, test_comm_status, test_dimming_status
 		FROM lampadaires
 		WHERE id = $1 AND archived_at IS NULL
 	`, id)
@@ -50,6 +51,7 @@ func scanLampadaireSingle(row *sql.Row) (*models.Lampadaire, error) {
 	var nomPowerW sql.NullInt64
 	var outCurrentMA, outVoltageV, powerFactor, drvTemp, ledTemp, energyKWh, opHours sql.NullFloat64
 	var surgeProt, d4iCompat sql.NullBool
+	var commNotes, testCommStatus, testDimmingStatus sql.NullString
 
 	err := row.Scan(
 		&item.ID, &item.Reference, &lat, &lng,
@@ -66,6 +68,7 @@ func scanLampadaireSingle(row *sql.Row) (*models.Lampadaire, error) {
 		&outCurrentMA, &outVoltageV, &powerFactor, &surgeProt,
 		&dimmingProto, &d4iCompat, &drvTemp, &ledTemp,
 		&energyKWh, &opHours, &faultStatus,
+		&commNotes, &testCommStatus, &testDimmingStatus,
 	)
 	if err != nil {
 		return nil, err
@@ -74,6 +77,9 @@ func scanLampadaireSingle(row *sql.Row) (*models.Lampadaire, error) {
 	populateLampadaireFields(&item, lat, lng, zone, typeDriver, protocole, puissance, lcuID, dateInstallation, lastSeenAt, lastCommandAt, address, quartier, lcuReference, driverReference, notes, deviceUID, nodeAddress)
 	populateControllerFields(&item, ctrlUID, ctrlType, ctrlStatus, ctrlFirmware, ctrlSignal, cabID, circID, ctrlLastSeen, ctrlEmbedded, dimmingEnabled, meteringEnabled, armoireRef, circuitRef)
 	populateDriverFields(&item, drvBrand, drvModel, drvProtocol, dimmingProto, faultStatus, nomPowerW, outCurrentMA, outVoltageV, powerFactor, drvTemp, ledTemp, energyKWh, opHours, surgeProt, d4iCompat)
+	if commNotes.Valid { item.CommissioningNotes = commNotes.String }
+	if testCommStatus.Valid { item.TestCommStatus = testCommStatus.String }
+	if testDimmingStatus.Valid { item.TestDimmingStatus = testDimmingStatus.String }
 	return &item, nil
 }
 
@@ -287,6 +293,7 @@ func ListLampadaires(ctx context.Context, db *sql.DB, search map[string]string) 
 			l.output_current_ma, l.output_voltage_v, l.power_factor, l.surge_protection,
 			l.dimming_protocol, l.d4i_compatible, l.driver_temperature, l.led_module_temperature,
 			l.energy_kwh, l.operating_hours, l.fault_status,
+			l.commissioning_notes, l.test_comm_status, l.test_dimming_status,
 			EXISTS(SELECT 1 FROM alerts a WHERE a.lampadaire_id = l.id AND a.status = 'open' AND a.severity = 'critical') as has_alert
 		FROM lampadaires l
 		WHERE ` + strings.Join(where, " AND ") + `
@@ -318,6 +325,7 @@ func ListLampadaires(ctx context.Context, db *sql.DB, search map[string]string) 
 		var nomPowerW sql.NullInt64
 		var outCurrentMA, outVoltageV, powerFactor, drvTemp, ledTemp, energyKWh, opHours sql.NullFloat64
 		var surgeProt, d4iCompat sql.NullBool
+		var commNotes, testCommSt, testDimSt sql.NullString
 
 		if err := rows.Scan(
 			&item.ID, &item.Reference, &lat, &lng,
@@ -334,6 +342,7 @@ func ListLampadaires(ctx context.Context, db *sql.DB, search map[string]string) 
 			&outCurrentMA, &outVoltageV, &powerFactor, &surgeProt,
 			&dimmingProto, &d4iCompat, &drvTemp, &ledTemp,
 			&energyKWh, &opHours, &faultStatus,
+			&commNotes, &testCommSt, &testDimSt,
 			&item.HasCriticalAlert,
 		); err != nil {
 			return nil, err
@@ -342,6 +351,9 @@ func ListLampadaires(ctx context.Context, db *sql.DB, search map[string]string) 
 		populateLampadaireFields(&item, lat, lng, zone, typeDriver, protocole, puissance, lcuID, dateInstallation, lastSeenAt, lastCommandAt, address, quartier, lcuReference, driverReference, notes, deviceUID, nodeAddress)
 		populateControllerFields(&item, ctrlUID, ctrlType, ctrlStatus, ctrlFirmware, ctrlSignal, cabID, circID, ctrlLastSeen, ctrlEmbedded, dimmingEnabled, meteringEnabled, armoireRef, circuitRef)
 		populateDriverFields(&item, drvBrand, drvModel, drvProtocol, dimmingProto, faultStatus, nomPowerW, outCurrentMA, outVoltageV, powerFactor, drvTemp, ledTemp, energyKWh, opHours, surgeProt, d4iCompat)
+		if commNotes.Valid { item.CommissioningNotes = commNotes.String }
+		if testCommSt.Valid { item.TestCommStatus = testCommSt.String }
+		if testDimSt.Valid { item.TestDimmingStatus = testDimSt.String }
 		result = append(result, item)
 	}
 

@@ -29,6 +29,9 @@ type Lampadaire struct {
 	DiscoveredByLCU     bool   `json:"discovered_by_lcu"`
 	LocationStatus      string `json:"location_status"`
 	CommissioningStatus string `json:"commissioning_status"`
+	CommissioningNotes  string `json:"commissioning_notes,omitempty"`
+	TestCommStatus      string `json:"test_comm_status,omitempty"`
+	TestDimmingStatus   string `json:"test_dimming_status,omitempty"`
 
 	// Controller fields — embedded from LCU sync, not manually entered
 	ControllerUID           string  `json:"controller_uid,omitempty"`

@@ -126,13 +126,11 @@ func HandleCreateUser(db *sql.DB) gin.HandlerFunc {
 			return
 		}
 		u.ID = id
-		services.LogAction(c.Request.Context(), db, services.AuditEvent{
-			Action:     "user.create",
-			TargetType: "user",
-			TargetID:   &id,
-			IPAddress:  c.ClientIP(),
-			UserAgent:  c.Request.UserAgent(),
-			Metadata:   map[string]interface{}{"email": u.Email, "role": u.Role},
+		services.LogAudit(c.Request.Context(), db, services.AuditLogInput{
+			Action: "user_created", EntityType: "user", EntityID: &id,
+			Description: "Utilisateur créé : " + u.Email,
+			NewValues: map[string]any{"email": u.Email, "role": u.Role, "status": u.Status},
+			IPAddress: c.ClientIP(), UserAgent: c.Request.UserAgent(),
 		})
 		RespondJSON(c, http.StatusCreated, u)
 	}
@@ -168,18 +166,12 @@ func HandleUpdateUser(db *sql.DB) gin.HandlerFunc {
 			RespondError(c, http.StatusInternalServerError, err.Error())
 			return
 		}
-		services.LogAction(c.Request.Context(), db, services.AuditEvent{
-			Action:     "user.update",
-			TargetType: "user",
-			TargetID:   &id,
-			IPAddress:  c.ClientIP(),
-			UserAgent:  c.Request.UserAgent(),
-			Metadata: map[string]interface{}{
-				"changes": map[string]interface{}{
-					"role":   payload.Role,
-					"status": payload.Status,
-				},
-			},
+		services.LogAudit(c.Request.Context(), db, services.AuditLogInput{
+			Action: "user_updated", EntityType: "user", EntityID: &id,
+			Description: "Utilisateur modifié",
+			OldValues: map[string]any{"role": existing.Role, "status": existing.Status},
+			NewValues: map[string]any{"role": payload.Role, "status": payload.Status},
+			IPAddress: c.ClientIP(), UserAgent: c.Request.UserAgent(),
 		})
 		u, _ := repository.GetUserByID(c.Request.Context(), db, id)
 		RespondJSON(c, http.StatusOK, u)
@@ -198,12 +190,11 @@ func HandleDeleteUser(db *sql.DB) gin.HandlerFunc {
 			RespondError(c, http.StatusNotFound, err.Error())
 			return
 		}
-		services.LogAction(c.Request.Context(), db, services.AuditEvent{
-			Action:     "user.delete",
-			TargetType: "user",
-			TargetID:   &id,
-			IPAddress:  c.ClientIP(),
-			UserAgent:  c.Request.UserAgent(),
+		services.LogAudit(c.Request.Context(), db, services.AuditLogInput{
+			Action: "user_deleted", EntityType: "user", EntityID: &id,
+			Description: "Utilisateur supprimé (soft delete)",
+			NewValues: map[string]any{"status": "deleted"},
+			IPAddress: c.ClientIP(), UserAgent: c.Request.UserAgent(),
 		})
 		RespondJSON(c, http.StatusOK, gin.H{"status": "deleted", "id": id})
 	}

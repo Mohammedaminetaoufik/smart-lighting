@@ -64,6 +64,14 @@ func HandleSimulateTelemetry(db *sql.DB) gin.HandlerFunc {
 			return
 		}
 
+		ac := services.GetAuditContext(c)
+		services.LogAudit(c.Request.Context(), db, services.AuditLogInput{
+			UserID: ac.UserID, UserName: ac.UserName, UserRole: ac.UserRole,
+			Action: "simulation_measure_generated", EntityType: "lampadaire", EntityID: &id,
+			Description: "Télémétrie simulée générée",
+			NewValues: map[string]any{"anomaly": anomaly, "measurement_id": insertedID},
+			IPAddress: ac.IPAddress, UserAgent: ac.UserAgent,
+		})
 		RespondJSON(c, http.StatusCreated, gin.H{"measurement": m, "alerts": alerts})
 	}
 }
@@ -117,6 +125,14 @@ func HandleSimulateAll(db *sql.DB) gin.HandlerFunc {
 			tx.Commit()
 		}
 
+		acAll := services.GetAuditContext(c)
+		services.LogAudit(c.Request.Context(), db, services.AuditLogInput{
+			UserID: acAll.UserID, UserName: acAll.UserName, UserRole: acAll.UserRole,
+			Action: "simulation_run_all", EntityType: "system",
+			Description: "Simulation télémétrie exécutée sur tous les lampadaires",
+			NewValues: map[string]any{"count": len(measurements)},
+			IPAddress: acAll.IPAddress, UserAgent: acAll.UserAgent,
+		})
 		RespondJSON(c, http.StatusCreated, gin.H{"count": len(measurements), "measurements": measurements})
 	}
 }
@@ -176,6 +192,14 @@ func HandleRunScenario(db *sql.DB) gin.HandlerFunc {
 			RespondError(c, http.StatusInternalServerError, "Commit error")
 			return
 		}
+		acSc := services.GetAuditContext(c)
+		services.LogAudit(c.Request.Context(), db, services.AuditLogInput{
+			UserID: acSc.UserID, UserName: acSc.UserName, UserRole: acSc.UserRole,
+			Action: "simulation_scenario_started", EntityType: "lampadaire", EntityID: &body.LampadaireID,
+			Description: "Scénario simulé : " + body.Scenario,
+			NewValues: map[string]any{"scenario": body.Scenario, "alert_triggered": alertMsg},
+			IPAddress: acSc.IPAddress, UserAgent: acSc.UserAgent,
+		})
 		result := gin.H{"scenario": body.Scenario, "measurement": m}
 		if alertMsg != "" {
 			result["alert_triggered"] = alertMsg

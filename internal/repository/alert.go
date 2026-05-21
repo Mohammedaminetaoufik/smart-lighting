@@ -8,7 +8,7 @@ import (
 	"map-interactif/internal/models"
 )
 
-// CreateAlertIfNotExists creates an alert only if no open alert of the same type exists.
+// CreateAlertIfNotExists creates an alert only if no open alert of the same type exists for that lampadaire.
 func CreateAlertIfNotExists(ctx context.Context, db DBExecutor, lampadaireID int, alertType string, severity string, message string) (*models.Alert, error) {
 	var count int
 	err := db.QueryRowContext(ctx,
@@ -46,7 +46,13 @@ func ResolveOpenAlert(ctx context.Context, db DBExecutor, lampadaireID int, aler
 	return err
 }
 
-// ListAlerts returns alerts with optional filters.
+// SetAlertWorkOrder links an alert to a work order.
+func SetAlertWorkOrder(db *sql.DB, alertID, workOrderID int) error {
+	_, err := db.Exec(`UPDATE alerts SET work_order_id=$1 WHERE id=$2`, workOrderID, alertID)
+	return err
+}
+
+// ListAlerts returns alerts with optional filters, including work_order_id.
 func ListAlerts(ctx context.Context, db *sql.DB, filters map[string]string) ([]models.Alert, error) {
 	where := []string{"1=1"}
 	args := []interface{}{}
@@ -70,13 +76,19 @@ func ListAlerts(ctx context.Context, db *sql.DB, filters map[string]string) ([]m
 	_ = argID
 
 	query := `
-		SELECT a.id, a.lampadaire_id, a.type, a.severity, a.message, a.status, a.created_at, a.resolved_at,
-			COALESCE(l.reference,'') as reference
+		SELECT a.id, a.lampadaire_id, a.type, a.severity, a.message, a.status,
+		       a.created_at, a.resolved_at, a.acknowledged_at, a.closed_at,
+		       COALESCE(a.probable_cause,'') as probable_cause,
+		       COALESCE(a.recommended_action,'') as recommended_action,
+		       COALESCE(a.source_type,'lampadaire') as source_type,
+		       a.work_order_id,
+		       COALESCE(l.reference,'') as reference,
+		       l.lcu_id, l.zone
 		FROM alerts a
 		LEFT JOIN lampadaires l ON a.lampadaire_id = l.id
 		WHERE ` + joinWhere(where) + `
 		ORDER BY a.created_at DESC
-		LIMIT 100
+		LIMIT 200
 	`
 
 	rows, err := db.QueryContext(ctx, query, args...)
@@ -88,18 +100,41 @@ func ListAlerts(ctx context.Context, db *sql.DB, filters map[string]string) ([]m
 	alerts := []models.Alert{}
 	for rows.Next() {
 		var a models.Alert
-		var lid sql.NullInt64
-		var resolved sql.NullTime
-		if err := rows.Scan(&a.ID, &lid, &a.Type, &a.Severity, &a.Message,
-			&a.Status, &a.CreatedAt, &resolved, &a.Reference); err != nil {
+		var lid, woID, lcuID sql.NullInt64
+		var resolved, acknowledged, closed sql.NullTime
+		var zone sql.NullString
+		if err := rows.Scan(
+			&a.ID, &lid, &a.Type, &a.Severity, &a.Message, &a.Status,
+			&a.CreatedAt, &resolved, &acknowledged, &closed,
+			&a.ProbableCause, &a.RecommendedAction, &a.SourceType,
+			&woID,
+			&a.Reference, &lcuID, &zone,
+		); err != nil {
 			continue
 		}
 		if lid.Valid {
 			v := int(lid.Int64)
 			a.LampadaireID = &v
 		}
+		if woID.Valid {
+			v := int(woID.Int64)
+			a.WorkOrderID = &v
+		}
+		if lcuID.Valid {
+			v := int(lcuID.Int64)
+			a.LCUID = &v
+		}
+		if zone.Valid {
+			a.Zone = zone.String
+		}
 		if resolved.Valid {
 			a.ResolvedAt = &resolved.Time
+		}
+		if acknowledged.Valid {
+			a.AcknowledgedAt = &acknowledged.Time
+		}
+		if closed.Valid {
+			a.ClosedAt = &closed.Time
 		}
 		alerts = append(alerts, a)
 	}

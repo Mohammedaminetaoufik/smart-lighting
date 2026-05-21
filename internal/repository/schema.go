@@ -547,6 +547,124 @@ func ensureSchemaV2(db *sql.DB) error {
 			archived_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 		);
 
+		-- Smart work order / maintenance workflow (v3)
+		ALTER TABLE alerts ADD COLUMN IF NOT EXISTS work_order_id INT REFERENCES work_orders(id) ON DELETE SET NULL;
+
+		ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS source_type VARCHAR(50) NOT NULL DEFAULT 'manual';
+		ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS source_alert_id INT REFERENCES alerts(id) ON DELETE SET NULL;
+		ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS lcu_id INT REFERENCES lcus(id) ON DELETE SET NULL;
+		ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS zone TEXT;
+		ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS equipment_type VARCHAR(50) NOT NULL DEFAULT 'lampadaire';
+		ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS equipment_reference TEXT;
+		ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS recommended_action TEXT;
+		ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS team_type VARCHAR(50) NOT NULL DEFAULT 'lighting';
+		ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMP WITH TIME ZONE;
+		ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS repeat_count INT NOT NULL DEFAULT 1;
+
+		DO $$
+		BEGIN
+			IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_work_order_source') THEN
+				ALTER TABLE work_orders ADD CONSTRAINT chk_work_order_source
+					CHECK (source_type IN ('alert', 'manual', 'system'));
+			END IF;
+			IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_work_order_equipment') THEN
+				ALTER TABLE work_orders ADD CONSTRAINT chk_work_order_equipment
+					CHECK (equipment_type IN ('lampadaire', 'lcu', 'group', 'system', 'cabinet', 'basestation'));
+			END IF;
+			IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_work_order_team') THEN
+				ALTER TABLE work_orders ADD CONSTRAINT chk_work_order_team
+					CHECK (team_type IN ('lighting', 'network', 'electrical', 'inspection'));
+			END IF;
+		END $$;
+
+		ALTER TABLE interventions ADD COLUMN IF NOT EXISTS work_order_id INT REFERENCES work_orders(id) ON DELETE SET NULL;
+		ALTER TABLE interventions ADD COLUMN IF NOT EXISTS technician_name TEXT;
+		ALTER TABLE interventions ADD COLUMN IF NOT EXISTS action_taken TEXT;
+		ALTER TABLE interventions ADD COLUMN IF NOT EXISTS note TEXT;
+		ALTER TABLE interventions ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMP WITH TIME ZONE;
+
+		CREATE INDEX IF NOT EXISTS idx_alerts_work_order ON alerts(work_order_id) WHERE work_order_id IS NOT NULL;
+		CREATE INDEX IF NOT EXISTS idx_work_orders_source_alert ON work_orders(source_alert_id) WHERE source_alert_id IS NOT NULL;
+		CREATE INDEX IF NOT EXISTS idx_work_orders_lcu ON work_orders(lcu_id) WHERE lcu_id IS NOT NULL;
+		CREATE INDEX IF NOT EXISTS idx_work_orders_zone ON work_orders(zone) WHERE zone IS NOT NULL;
+		CREATE INDEX IF NOT EXISTS idx_interventions_work_order ON interventions(work_order_id) WHERE work_order_id IS NOT NULL;
+
+	`)
+	if err != nil {
+		return err
+	}
+	return ensureSchemaV3(db)
+}
+
+func ensureSchemaV3(db *sql.DB) error {
+	_, err := db.Exec(`
+		-- Work order technician & lifecycle fields (v3)
+		ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS technician_id INT REFERENCES users(id) ON DELETE SET NULL;
+		ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS assigned_to_name TEXT;
+		ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS accepted_at TIMESTAMP WITH TIME ZONE;
+		ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS started_at TIMESTAMP WITH TIME ZONE;
+		ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMP WITH TIME ZONE;
+		ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS created_by INT REFERENCES users(id) ON DELETE SET NULL;
+		ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS closed_by INT REFERENCES users(id) ON DELETE SET NULL;
+		ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS resolution_type TEXT;
+		ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS closing_note TEXT;
+
+		-- Extend source_type constraint to include 'calculator'
+		ALTER TABLE work_orders DROP CONSTRAINT IF EXISTS chk_work_order_source;
+		DO $$
+		BEGIN
+			IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_work_order_source_v2') THEN
+				ALTER TABLE work_orders ADD CONSTRAINT chk_work_order_source_v2
+					CHECK (source_type IN ('alert', 'manual', 'system', 'calculator'));
+			END IF;
+		END $$;
+
+		-- Work order logs / audit trail
+		CREATE TABLE IF NOT EXISTS work_order_logs (
+			id SERIAL PRIMARY KEY,
+			work_order_id INT NOT NULL REFERENCES work_orders(id) ON DELETE CASCADE,
+			user_id INT REFERENCES users(id) ON DELETE SET NULL,
+			user_name TEXT,
+			role TEXT,
+			action TEXT NOT NULL,
+			note TEXT,
+			old_status TEXT,
+			new_status TEXT,
+			created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+		);
+		CREATE INDEX IF NOT EXISTS idx_wo_logs_work_order ON work_order_logs(work_order_id);
+		CREATE INDEX IF NOT EXISTS idx_wo_logs_created ON work_order_logs(created_at DESC);
+	`)
+	if err != nil {
+		return err
+	}
+	return ensureSchemaV4(db)
+}
+
+func ensureSchemaV4(db *sql.DB) error {
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS audit_logs (
+			id SERIAL PRIMARY KEY,
+			user_id INTEGER NULL,
+			user_name TEXT NULL,
+			user_role TEXT NULL,
+			action TEXT NOT NULL,
+			entity_type TEXT NOT NULL,
+			entity_id INTEGER NULL,
+			entity_reference TEXT NULL,
+			description TEXT NOT NULL,
+			old_values JSONB NULL,
+			new_values JSONB NULL,
+			status TEXT NOT NULL DEFAULT 'success',
+			ip_address TEXT NULL,
+			user_agent TEXT NULL,
+			created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+		);
+		CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);
+		CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON audit_logs(entity_type, entity_id);
+		CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id);
+		CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at DESC);
+		CREATE INDEX IF NOT EXISTS idx_audit_logs_status ON audit_logs(status);
 	`)
 	return err
 }

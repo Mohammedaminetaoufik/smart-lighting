@@ -78,6 +78,55 @@ func HandleDisableLightingProfile(db *sql.DB) gin.HandlerFunc {
 	}
 }
 
+// HandleUpdateLightingProfile handles PUT /api/lighting-profiles/:id.
+func HandleUpdateLightingProfile(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, err := ParseIDParam(c, "id")
+		if err != nil {
+			RespondError(c, http.StatusBadRequest, "ID invalide")
+			return
+		}
+		var p models.LightingProfile
+		if err := c.BindJSON(&p); err != nil {
+			RespondError(c, http.StatusBadRequest, "Invalid JSON")
+			return
+		}
+		p.ID = id
+		if err := repository.UpdateLightingProfile(db, &p); err != nil {
+			RespondError(c, http.StatusInternalServerError, "Erreur lors de la mise à jour")
+			return
+		}
+		updated, err := repository.GetLightingProfileByID(db, id)
+		if err != nil {
+			RespondJSON(c, http.StatusOK, gin.H{"status": "updated"})
+			return
+		}
+		RespondJSON(c, http.StatusOK, updated)
+	}
+}
+
+// HandleDeleteLightingProfile handles DELETE /api/lighting-profiles/:id.
+func HandleDeleteLightingProfile(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, err := ParseIDParam(c, "id")
+		if err != nil {
+			RespondError(c, http.StatusBadRequest, "ID invalide")
+			return
+		}
+		db.Exec("DELETE FROM lighting_profile_schedules WHERE profile_id = $1", id)
+		result, err := db.Exec("DELETE FROM lighting_profiles WHERE id = $1", id)
+		if err != nil {
+			RespondError(c, http.StatusInternalServerError, "Erreur lors de la suppression")
+			return
+		}
+		if n, _ := result.RowsAffected(); n == 0 {
+			RespondError(c, http.StatusNotFound, "Profil introuvable")
+			return
+		}
+		RespondJSON(c, http.StatusOK, gin.H{"status": "deleted"})
+	}
+}
+
 // HandleApplyLightingProfile handles POST /api/lighting-profiles/:id/apply.
 func HandleApplyLightingProfile(db *sql.DB, adapter services.LCUAdapter) gin.HandlerFunc {
 	return func(c *gin.Context) {

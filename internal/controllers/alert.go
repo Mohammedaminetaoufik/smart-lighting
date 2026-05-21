@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"map-interactif/internal/repository"
+	"map-interactif/internal/services"
 )
 
 // HandleGetAlerts handles GET /api/alerts.
@@ -36,7 +37,7 @@ func HandleResolveAlert(db *sql.DB) gin.HandlerFunc {
 		}
 
 		result, err := db.ExecContext(c.Request.Context(),
-			`UPDATE alerts SET status = 'resolved', resolved_at = NOW() WHERE id = $1 AND status = 'open'`, id)
+			`UPDATE alerts SET status = 'resolved', resolved_at = NOW() WHERE id = $1 AND status NOT IN ('resolved','closed')`, id)
 		if err != nil {
 			RespondError(c, http.StatusInternalServerError, "Erreur lors de la résolution.")
 			return
@@ -47,7 +48,14 @@ func HandleResolveAlert(db *sql.DB) gin.HandlerFunc {
 			RespondError(c, http.StatusNotFound, "Alerte introuvable ou déjà résolue.")
 			return
 		}
-
+		acR := services.GetAuditContext(c)
+		services.LogAudit(c.Request.Context(), db, services.AuditLogInput{
+			UserID: acR.UserID, UserName: acR.UserName, UserRole: acR.UserRole,
+			Action: "alert_resolved", EntityType: "alert", EntityID: &id,
+			Description: "Alerte résolue",
+			NewValues: map[string]any{"status": "resolved"},
+			IPAddress: acR.IPAddress, UserAgent: acR.UserAgent,
+		})
 		RespondJSON(c, http.StatusOK, gin.H{"status": "resolved"})
 	}
 }
@@ -135,6 +143,14 @@ func HandleAckAlert(db *sql.DB) gin.HandlerFunc {
 			RespondError(c, http.StatusInternalServerError, "Database error")
 			return
 		}
+		ac := services.GetAuditContext(c)
+		services.LogAudit(c.Request.Context(), db, services.AuditLogInput{
+			UserID: ac.UserID, UserName: ac.UserName, UserRole: ac.UserRole,
+			Action: "alert_acknowledged", EntityType: "alert", EntityID: &id,
+			Description: "Alerte acquittée",
+			NewValues: map[string]any{"status": "acknowledged"},
+			IPAddress: ac.IPAddress, UserAgent: ac.UserAgent,
+		})
 		RespondJSON(c, http.StatusOK, gin.H{"status": "acknowledged", "alert_id": id})
 	}
 }
@@ -154,7 +170,57 @@ func HandleCloseAlert(db *sql.DB) gin.HandlerFunc {
 			RespondError(c, http.StatusInternalServerError, "Database error")
 			return
 		}
+		acC := services.GetAuditContext(c)
+		services.LogAudit(c.Request.Context(), db, services.AuditLogInput{
+			UserID: acC.UserID, UserName: acC.UserName, UserRole: acC.UserRole,
+			Action: "alert_closed", EntityType: "alert", EntityID: &id,
+			Description: "Alerte fermée",
+			NewValues: map[string]any{"status": "closed"},
+			IPAddress: acC.IPAddress, UserAgent: acC.UserAgent,
+		})
 		RespondJSON(c, http.StatusOK, gin.H{"status": "closed", "alert_id": id})
 	}
 }
 
+// HandleCreateWorkOrderFromAlert handles POST /api/alerts/:id/create-work-order.
+// Implements the smart creation logic: dedup, diagnose, link.
+func HandleCreateWorkOrderFromAlert(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, err := ParseIDParam(c, "id")
+		if err != nil {
+			RespondError(c, http.StatusBadRequest, "ID invalide")
+			return
+		}
+
+		wo, existed, err := services.CreateWorkOrderFromAlert(db, id)
+		if err != nil {
+			RespondError(c, http.StatusInternalServerError, "Erreur création bon de travail: "+err.Error())
+			return
+		}
+
+		status := http.StatusCreated
+		if existed {
+			status = http.StatusOK
+		}
+		acWO := services.GetAuditContext(c)
+		services.LogAudit(c.Request.Context(), db, services.AuditLogInput{
+			UserID: acWO.UserID, UserName: acWO.UserName, UserRole: acWO.UserRole,
+			Action: "work_order_created_from_alert", EntityType: "alert", EntityID: &id,
+			Description: messageForWO(existed),
+			NewValues: map[string]any{"work_order_id": wo.ID, "existed": existed},
+			IPAddress: acWO.IPAddress, UserAgent: acWO.UserAgent,
+		})
+		RespondJSON(c, status, gin.H{
+			"work_order": wo,
+			"existed":    existed,
+			"message":    messageForWO(existed),
+		})
+	}
+}
+
+func messageForWO(existed bool) string {
+	if existed {
+		return "Alerte liée au bon de travail existant"
+	}
+	return "Bon de travail créé"
+}

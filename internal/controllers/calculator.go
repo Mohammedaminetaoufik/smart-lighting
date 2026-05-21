@@ -126,6 +126,14 @@ func HandleRunCalculator(db *sql.DB, adapter services.LCUAdapter) gin.HandlerFun
 			RespondError(c, http.StatusInternalServerError, "Erreur calculateur: "+err.Error())
 			return
 		}
+		ac := services.GetAuditContext(c)
+		services.LogAudit(c.Request.Context(), db, services.AuditLogInput{
+			UserID: ac.UserID, UserName: ac.UserName, UserRole: ac.UserRole,
+			Action: "calculator_run", EntityType: "lampadaire", EntityID: &id,
+			Description: "Calculateur exécuté — intensité recommandée calculée",
+			NewValues: map[string]any{"recommended_intensity": decision.RecommendedIntensity, "applied": decision.Applied, "rule": decision.RuleName},
+			IPAddress: ac.IPAddress, UserAgent: ac.UserAgent,
+		})
 		RespondJSON(c, http.StatusOK, decision)
 	}
 }
@@ -159,6 +167,14 @@ func HandleRunCalculatorAll(db *sql.DB, adapter services.LCUAdapter) gin.Handler
 				decisions = append(decisions, *d)
 			}
 		}
+		acAll := services.GetAuditContext(c)
+		services.LogAudit(c.Request.Context(), db, services.AuditLogInput{
+			UserID: acAll.UserID, UserName: acAll.UserName, UserRole: acAll.UserRole,
+			Action: "calculator_run_all", EntityType: "system",
+			Description: fmt.Sprintf("Calculateur exécuté sur tous les lampadaires (%d)", len(decisions)),
+			NewValues: map[string]any{"count": len(decisions), "apply": body.Apply},
+			IPAddress: acAll.IPAddress, UserAgent: acAll.UserAgent,
+		})
 		RespondJSON(c, http.StatusOK, gin.H{"count": len(decisions), "decisions": decisions})
 	}
 }

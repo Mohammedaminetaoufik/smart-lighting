@@ -109,6 +109,69 @@ func HandleRestoreLampadaire(db *sql.DB) gin.HandlerFunc {
 	}
 }
 
+// HandlePatchLampadaireJSON handles PATCH /api/lampadaires/:id — updates editable user fields.
+func HandlePatchLampadaireJSON(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, err := ParseIDParam(c, "id")
+		if err != nil {
+			RespondError(c, http.StatusBadRequest, "ID invalide")
+			return
+		}
+		existing, err := repository.GetLampadaireByID(c.Request.Context(), db, id)
+		if err != nil {
+			RespondError(c, http.StatusNotFound, "Lampadaire introuvable")
+			return
+		}
+		var patch struct {
+			Zone      string `json:"zone"`
+			TypeDriver string `json:"type_driver"`
+			Protocole string `json:"protocole"`
+			Puissance *int   `json:"puissance"`
+			Address   string `json:"address"`
+			Quartier  string `json:"quartier"`
+			Notes     string `json:"notes"`
+		}
+		if err := c.BindJSON(&patch); err != nil {
+			RespondError(c, http.StatusBadRequest, "Invalid JSON")
+			return
+		}
+		if patch.Zone != "" {
+			existing.Zone = patch.Zone
+		}
+		if patch.TypeDriver != "" {
+			existing.TypeDriver = patch.TypeDriver
+		}
+		if patch.Protocole != "" {
+			existing.Protocole = patch.Protocole
+		}
+		if patch.Puissance != nil {
+			existing.Puissance = patch.Puissance
+		}
+		if patch.Address != "" {
+			existing.Address = patch.Address
+		}
+		if patch.Quartier != "" {
+			existing.Quartier = patch.Quartier
+		}
+		existing.Notes = patch.Notes
+		if err := repository.UpdateLampadaire(c.Request.Context(), db, *existing); err != nil {
+			RespondError(c, http.StatusInternalServerError, "Erreur lors de la mise à jour")
+			return
+		}
+		updated, _ := repository.GetLampadaireByID(c.Request.Context(), db, id)
+		ac := services.GetAuditContext(c)
+		services.LogAudit(c.Request.Context(), db, services.AuditLogInput{
+			UserID: ac.UserID, UserName: ac.UserName, UserRole: ac.UserRole,
+			Action: "lampadaire_updated", EntityType: "lampadaire", EntityID: &id,
+			EntityReference: existing.Reference,
+			Description: "Lampadaire modifié : " + existing.Reference,
+			NewValues: map[string]any{"zone": patch.Zone, "type_driver": patch.TypeDriver, "puissance": patch.Puissance},
+			IPAddress: ac.IPAddress, UserAgent: ac.UserAgent,
+		})
+		RespondJSON(c, http.StatusOK, updated)
+	}
+}
+
 // HandleListLampadairesJSON handles GET /api/lampadaires — lists all non-archived lampadaires.
 func HandleListLampadairesJSON(db *sql.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -218,6 +281,14 @@ func HandleUpdateLampadaireLocation(db *sql.DB) gin.HandlerFunc {
 			RespondError(c, http.StatusInternalServerError, "Database error")
 			return
 		}
+		acLoc := services.GetAuditContext(c)
+		services.LogAudit(c.Request.Context(), db, services.AuditLogInput{
+			UserID: acLoc.UserID, UserName: acLoc.UserName, UserRole: acLoc.UserRole,
+			Action: "lampadaire_localized", EntityType: "lampadaire", EntityID: &id,
+			Description: "Localisation GPS définie pour le lampadaire",
+			NewValues: map[string]any{"latitude": payload.Latitude, "longitude": payload.Longitude},
+			IPAddress: acLoc.IPAddress, UserAgent: acLoc.UserAgent,
+		})
 		RespondJSON(c, http.StatusOK, map[string]string{"status": "success"})
 	}
 }
@@ -285,6 +356,14 @@ func HandleAssignLCU(db *sql.DB) gin.HandlerFunc {
 				return
 			}
 		}
+		acLcu := services.GetAuditContext(c)
+		services.LogAudit(c.Request.Context(), db, services.AuditLogInput{
+			UserID: acLcu.UserID, UserName: acLcu.UserName, UserRole: acLcu.UserRole,
+			Action: "lampadaire_lcu_assigned", EntityType: "lampadaire", EntityID: &id,
+			Description: "LCU assignée au lampadaire",
+			NewValues: map[string]any{"lcu_id": body.LCUID},
+			IPAddress: acLcu.IPAddress, UserAgent: acLcu.UserAgent,
+		})
 		RespondJSON(c, http.StatusOK, gin.H{"lampadaire_id": id, "lcu_id": body.LCUID})
 	}
 }

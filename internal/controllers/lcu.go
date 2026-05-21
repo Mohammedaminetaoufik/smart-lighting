@@ -54,11 +54,29 @@ func HandleCreateLCUJSON(db *sql.DB) gin.HandlerFunc {
 		if lcu.Status == "" {
 			lcu.Status = "unknown"
 		}
+		if lcu.IPAddress == "" {
+			lcu.IPAddress = "0.0.0.0"
+		}
+		if lcu.Port == 0 {
+			lcu.Port = 8080
+		}
+		if lcu.Protocol == "" {
+			lcu.Protocol = "HTTP"
+		}
 		result, err := repository.UpsertLCUByReference(c.Request.Context(), db, lcu)
 		if err != nil {
 			RespondError(c, http.StatusInternalServerError, "Erreur lors de l'enregistrement")
 			return
 		}
+		ac := services.GetAuditContext(c)
+		services.LogAudit(c.Request.Context(), db, services.AuditLogInput{
+			UserID: ac.UserID, UserName: ac.UserName, UserRole: ac.UserRole,
+			Action: "lcu_created", EntityType: "lcu", EntityID: &result.ID,
+			EntityReference: result.Reference,
+			Description: "LCU créée : " + result.Reference,
+			NewValues:   map[string]any{"reference": result.Reference, "ip": result.IPAddress, "zone": result.Zone},
+			IPAddress: ac.IPAddress, UserAgent: ac.UserAgent,
+		})
 		RespondJSON(c, http.StatusCreated, result)
 	}
 }
@@ -118,6 +136,48 @@ func HandleUpdateLCU(db *sql.DB) gin.HandlerFunc {
 	}
 }
 
+// HandleUpdateLCUJSON handles PUT /api/lcus/:id.
+func HandleUpdateLCUJSON(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, err := ParseIDParam(c, "id")
+		if err != nil {
+			RespondError(c, http.StatusBadRequest, "ID invalide")
+			return
+		}
+		existing, err := repository.GetLCUByID(c.Request.Context(), db, id)
+		if err != nil {
+			RespondError(c, http.StatusNotFound, "LCU introuvable")
+			return
+		}
+		var patch models.LCU
+		if err := c.BindJSON(&patch); err != nil {
+			RespondError(c, http.StatusBadRequest, "Invalid JSON")
+			return
+		}
+		patch.ID = id
+		patch.Status = existing.Status
+		if patch.Port == 0 {
+			patch.Port = existing.Port
+		}
+		if err := repository.UpdateLCU(c.Request.Context(), db, patch); err != nil {
+			RespondError(c, http.StatusInternalServerError, "Erreur lors de la mise à jour")
+			return
+		}
+		updated, _ := repository.GetLCUByID(c.Request.Context(), db, id)
+		ac := services.GetAuditContext(c)
+		services.LogAudit(c.Request.Context(), db, services.AuditLogInput{
+			UserID: ac.UserID, UserName: ac.UserName, UserRole: ac.UserRole,
+			Action: "lcu_updated", EntityType: "lcu", EntityID: &id,
+			EntityReference: existing.Reference,
+			Description: "LCU modifiée : " + existing.Reference,
+			OldValues: map[string]any{"ip": existing.IPAddress, "zone": existing.Zone, "protocol": existing.Protocol},
+			NewValues: map[string]any{"ip": patch.IPAddress, "zone": patch.Zone, "protocol": patch.Protocol},
+			IPAddress: ac.IPAddress, UserAgent: ac.UserAgent,
+		})
+		RespondJSON(c, http.StatusOK, updated)
+	}
+}
+
 // HandleTestLCU handles POST /api/lcus/:id/test.
 func HandleTestLCU(db *sql.DB, adapter services.LCUAdapter) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -140,6 +200,20 @@ func HandleTestLCU(db *sql.DB, adapter services.LCUAdapter) gin.HandlerFunc {
 		}
 
 		repository.UpdateLCUStatus(c.Request.Context(), db, id, status)
+		ac := services.GetAuditContext(c)
+		auditStatus := "success"
+		if err != nil {
+			auditStatus = "error"
+		}
+		services.LogAudit(c.Request.Context(), db, services.AuditLogInput{
+			UserID: ac.UserID, UserName: ac.UserName, UserRole: ac.UserRole,
+			Action: "lcu_tested", EntityType: "lcu", EntityID: &id,
+			EntityReference: lcu.Reference,
+			Description: "Test connexion LCU : " + lcu.Reference + " → " + status,
+			NewValues: map[string]any{"status": status},
+			Status: auditStatus,
+			IPAddress: ac.IPAddress, UserAgent: ac.UserAgent,
+		})
 
 		if err != nil {
 			RespondError(c, http.StatusServiceUnavailable, "echec du test : "+err.Error())
@@ -160,6 +234,20 @@ func HandleSyncLCU(db *sql.DB, adapter services.LCUAdapter) gin.HandlerFunc {
 		}
 
 		result, err := services.SyncLCU(c.Request.Context(), db, adapter, id)
+		ac2 := services.GetAuditContext(c)
+		syncStatus := "success"
+		syncDesc := "Synchronisation LCU réussie"
+		if err != nil {
+			syncStatus = "error"
+			syncDesc = "Échec synchronisation LCU : " + err.Error()
+		}
+		services.LogAudit(c.Request.Context(), db, services.AuditLogInput{
+			UserID: ac2.UserID, UserName: ac2.UserName, UserRole: ac2.UserRole,
+			Action: "lcu_synced", EntityType: "lcu", EntityID: &id,
+			Description: syncDesc,
+			Status: syncStatus,
+			IPAddress: ac2.IPAddress, UserAgent: ac2.UserAgent,
+		})
 		if err != nil {
 			RespondError(c, http.StatusServiceUnavailable, "Erreur synchronisation: "+err.Error())
 			return
@@ -190,6 +278,101 @@ func HandleGetLCULampadaires(db *sql.DB) gin.HandlerFunc {
 			return
 		}
 		RespondJSON(c, http.StatusOK, lampadaires)
+	}
+}
+
+// HandleBulkDimLCU handles POST /api/lcus/:id/bulk-dim.
+// Dims all lampadaires attached to the LCU in one DB operation and writes
+// exactly one audit event — regardless of how many lamps are affected.
+func HandleBulkDimLCU(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, err := ParseIDParam(c, "id")
+		if err != nil {
+			RespondError(c, http.StatusBadRequest, "ID invalide")
+			return
+		}
+		var body struct {
+			Intensity int    `json:"intensity"`
+			Reason    string `json:"reason"`
+		}
+		if !BindRequiredJSON(c, &body) {
+			return
+		}
+		if body.Intensity < 0 || body.Intensity > 100 {
+			RespondError(c, http.StatusBadRequest, "L'intensité doit être entre 0 et 100")
+			return
+		}
+
+		lcu, err := repository.GetLCUByID(c.Request.Context(), db, id)
+		if err != nil {
+			RespondError(c, http.StatusNotFound, "LCU introuvable")
+			return
+		}
+
+		reason := body.Reason
+		if reason == "" {
+			reason = "Gradation manuelle LCU"
+		}
+
+		// Fetch all active lamps for this LCU
+		rows, err := db.QueryContext(c.Request.Context(),
+			`SELECT id FROM lampadaires WHERE lcu_id=$1 AND archived_at IS NULL`, id)
+		if err != nil {
+			RespondError(c, http.StatusInternalServerError, "Erreur lecture lampadaires")
+			return
+		}
+		defer rows.Close()
+		var lampIDs []int
+		for rows.Next() {
+			var lid int
+			if rows.Scan(&lid) == nil {
+				lampIDs = append(lampIDs, lid)
+			}
+		}
+
+		if len(lampIDs) == 0 {
+			RespondJSON(c, http.StatusOK, gin.H{"updated": 0, "message": "Aucun lampadaire dans cette LCU"})
+			return
+		}
+
+		// Batch update — single statement using unnest
+		_, err = db.ExecContext(c.Request.Context(), `
+			UPDATE lampadaires SET intensite=$1, last_command_at=NOW(), updated_at=NOW()
+			WHERE lcu_id=$2 AND archived_at IS NULL`, body.Intensity, id)
+		if err != nil {
+			RespondError(c, http.StatusInternalServerError, "Erreur mise à jour intensité: "+err.Error())
+			return
+		}
+
+		// Insert ONE dimming_command row as a summary record
+		db.ExecContext(c.Request.Context(), `
+			INSERT INTO dimming_commands (lampadaire_id, source, new_intensity, reason, status, applied_at)
+			VALUES ($1, 'bulk_lcu', $2, $3, 'applied', NOW())`,
+			lampIDs[0], body.Intensity, reason)
+
+		// ONE audit event for the whole operation
+		ac := services.GetAuditContext(c)
+		services.LogAudit(c.Request.Context(), db, services.AuditLogInput{
+			UserID: ac.UserID, UserName: ac.UserName, UserRole: ac.UserRole,
+			Action: "dimming_bulk_lcu", EntityType: "lcu", EntityID: &id,
+			EntityReference: lcu.Reference,
+			Description: strings.Join([]string{
+				"Gradation en masse LCU", lcu.Reference,
+				":", strings.TrimSpace(reason),
+			}, " "),
+			NewValues: map[string]any{
+				"intensity":   body.Intensity,
+				"lamp_count":  len(lampIDs),
+				"lcu_reference": lcu.Reference,
+			},
+			IPAddress: ac.IPAddress, UserAgent: ac.UserAgent,
+		})
+
+		RespondJSON(c, http.StatusOK, gin.H{
+			"updated":   len(lampIDs),
+			"intensity": body.Intensity,
+			"lcu_id":    id,
+		})
 	}
 }
 

@@ -29,3 +29,21 @@ type AccessLog struct {
 	UserAgent  string                 `json:"user_agent,omitempty"`
 	CreatedAt  string                 `json:"created_at"`
 }
+
+type AuditLog struct {
+	ID              int                    `json:"id"`
+	UserID          *int                   `json:"user_id,omitempty"`
+	UserName        string                 `json:"user_name,omitempty"`
+	UserRole        string                 `json:"user_role,omitempty"`
+	Action          string                 `json:"action"`
+	EntityType      string                 `json:"entity_type"`
+	EntityID        *int                   `json:"entity_id,omitempty"`
+	EntityReference string                 `json:"entity_reference,omitempty"`
+	Description     string                 `json:"description"`
+	OldValues       map[string]interface{} `json:"old_values,omitempty"`
+	NewValues       map[string]interface{} `json:"new_values,omitempty"`
+	Status          string                 `json:"status"`
+	IPAddress       string                 `json:"ip_address,omitempty"`
+	UserAgent       string                 `json:"user_agent,omitempty"`
+	CreatedAt       string                 `json:"created_at"`
+}

@@ -77,6 +77,15 @@ func HandlePostDimming(db *sql.DB, adapter services.LCUAdapter) gin.HandlerFunc 
 					tx.ExecContext(c.Request.Context(), "UPDATE dimming_commands SET status = 'failed' WHERE id = $1", cmdID)
 					repository.CreateAlertIfNotExists(c.Request.Context(), tx, id, "commande_non_appliquee", "critical", "Échec LCU: "+err.Error())
 					tx.Commit()
+					acDF := services.GetAuditContext(c)
+					services.LogAudit(c.Request.Context(), db, services.AuditLogInput{
+						UserID: acDF.UserID, UserName: acDF.UserName, UserRole: acDF.UserRole,
+						Action: "dimming_command_failed", EntityType: "lampadaire", EntityID: &id,
+						Description: "Échec envoi commande gradation : " + err.Error(),
+						NewValues: map[string]any{"intensity": body.NewIntensity, "error": err.Error()},
+						Status: "error",
+						IPAddress: acDF.IPAddress, UserAgent: acDF.UserAgent,
+					})
 					RespondError(c, http.StatusServiceUnavailable, "Échec envoi à la LCU")
 					return
 				}
@@ -97,6 +106,16 @@ func HandlePostDimming(db *sql.DB, adapter services.LCUAdapter) gin.HandlerFunc 
 			RespondError(c, http.StatusInternalServerError, "Erreur lors de la validation de la transaction.")
 			return
 		}
+
+		acD := services.GetAuditContext(c)
+		services.LogAudit(c.Request.Context(), db, services.AuditLogInput{
+			UserID: acD.UserID, UserName: acD.UserName, UserRole: acD.UserRole,
+			Action: "dimming_command_sent", EntityType: "lampadaire", EntityID: &id,
+			Description: "Commande de gradation envoyée",
+			OldValues: map[string]any{"intensity": oldIntensity},
+			NewValues: map[string]any{"intensity": body.NewIntensity, "source": body.Source, "reason": body.Reason},
+			IPAddress: acD.IPAddress, UserAgent: acD.UserAgent,
+		})
 
 		RespondJSON(c, http.StatusOK, gin.H{
 			"status": "success",

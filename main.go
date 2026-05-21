@@ -106,14 +106,17 @@ func main() {
 		api.GET("/lcus", controllers.HandleListLCUsJSON(db))
 		api.POST("/lcus", controllers.HandleCreateLCUJSON(db))
 		api.GET("/lcus/:id", controllers.HandleGetLCUJSON(db))
+		api.PUT("/lcus/:id", controllers.HandleUpdateLCUJSON(db))
 		api.POST("/lcus/:id/test", controllers.HandleTestLCU(db, lcuAdapter))
 		api.POST("/lcus/:id/sync", controllers.HandleSyncLCU(db, lcuAdapter))
 		api.GET("/lcus/:id/lampadaires", controllers.HandleGetLCULampadaires(db))
+		api.POST("/lcus/:id/bulk-dim", controllers.HandleBulkDimLCU(db))
 
 		// Lampadaires API
 		api.GET("/lampadaires", controllers.HandleListLampadairesJSON(db))
 		api.GET("/lampadaires/missing-location", controllers.HandleGetMissingLocationLampadaires(db))
 		api.GET("/lampadaires/:id", controllers.HandleGetLampadaireJSON(db))
+		api.PATCH("/lampadaires/:id", controllers.HandlePatchLampadaireJSON(db))
 		api.POST("/lampadaires/:id/location", controllers.HandleUpdateLampadaireLocation(db))
 		api.POST("/lampadaires/:id/commissioning", controllers.HandleUpdateCommissioningStatus(db))
 		api.POST("/lampadaires/:id/assign-lcu", controllers.HandleAssignLCU(db))
@@ -126,6 +129,8 @@ func main() {
 		api.GET("/lighting-profiles/:id/details", controllers.HandleGetLightingProfileDetails(db))
 		api.POST("/lighting-profiles/:id/enable", controllers.HandleEnableLightingProfile(db))
 		api.POST("/lighting-profiles/:id/disable", controllers.HandleDisableLightingProfile(db))
+		api.PUT("/lighting-profiles/:id", controllers.HandleUpdateLightingProfile(db))
+		api.DELETE("/lighting-profiles/:id", controllers.HandleDeleteLightingProfile(db))
 
 		// Lighting Groups API
 		api.GET("/lighting-groups", controllers.HandleGetLightingGroups(db))
@@ -196,17 +201,27 @@ func main() {
 
 		// Work Orders API
 		api.GET("/workorders", controllers.HandleGetWorkOrders(db))
+		api.GET("/workorders/open", controllers.HandleGetOpenWorkOrders(db))
 		api.POST("/workorders", controllers.HandleCreateWorkOrder(db))
 		api.GET("/workorders/:id", controllers.HandleGetWorkOrder(db))
 		api.POST("/workorders/from-alerts", controllers.HandleCreateWorkOrderFromAlerts(db))
 		api.POST("/workorders/:id/assign", controllers.HandleAssignWorkOrder(db))
+		api.POST("/workorders/:id/accept", controllers.HandleAcceptWorkOrder(db))
 		api.POST("/workorders/:id/start", controllers.HandleStartWorkOrder(db))
 		api.POST("/workorders/:id/resolve", controllers.HandleResolveWorkOrder(db))
 		api.POST("/workorders/:id/close", controllers.HandleCloseWorkOrder(db))
+		api.POST("/workorders/:id/cancel", controllers.HandleCancelWorkOrder(db))
+		api.POST("/workorders/:id/reopen", controllers.HandleReopenWorkOrder(db))
+		api.POST("/workorders/:id/add-note", controllers.HandleAddWorkOrderNote(db))
+		api.GET("/workorders/:id/alerts", controllers.HandleGetWorkOrderAlerts(db))
+		api.GET("/workorders/:id/interventions", controllers.HandleGetWorkOrderInterventions(db))
+		api.POST("/workorders/:id/interventions", controllers.HandleCreateWorkOrderIntervention(db))
+		api.GET("/workorders/:id/logs", controllers.HandleGetWorkOrderLogs(db))
 
 		// Alerts extended
 		api.POST("/alerts/:id/ack", controllers.HandleAckAlert(db))
 		api.POST("/alerts/:id/close", controllers.HandleCloseAlert(db))
+		api.POST("/alerts/:id/create-work-order", controllers.HandleCreateWorkOrderFromAlert(db))
 
 		// Dashboard extended
 		api.GET("/dashboard/network-health", controllers.HandleGetNetworkHealth(db))
@@ -218,6 +233,9 @@ func main() {
 		api.POST("/commissioning/:id/test-dimming", controllers.HandleTestDimmingCommissioning(db))
 		api.POST("/commissioning/:id/validate", controllers.HandleValidateCommissioning(db))
 		api.POST("/commissioning/:id/fail", controllers.HandleFailCommissioning(db))
+		api.POST("/commissioning/batch-test", controllers.HandleBatchTest(db))
+		api.POST("/commissioning/validate-successful", controllers.HandleValidateSuccessful(db))
+		api.POST("/commissioning/retry-failed", controllers.HandleRetryFailed(db))
 
 		// Bulk operations
 		api.PATCH("/lampadaires/bulk", controllers.HandleBulkUpdateLampadaires(db))
@@ -232,6 +250,8 @@ func main() {
 
 		// Audit Log
 		api.GET("/audit-logs", controllers.HandleGetAuditLogs(db))
+		api.GET("/audit-logs/summary", controllers.HandleGetAuditSummary(db))
+		api.GET("/audit-logs/:id", controllers.HandleGetAuditLog(db))
 
 		// Global search
 		api.GET("/search", controllers.HandleGlobalSearch(db))
