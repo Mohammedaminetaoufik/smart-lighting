@@ -256,6 +256,13 @@ func main() {
 		// Global search
 		api.GET("/search", controllers.HandleGlobalSearch(db))
 
+		// AI Service proxy
+		api.GET("/ai/health", controllers.HandleAIHealth())
+		api.POST("/ai/query", controllers.HandleAIQuery())
+		api.GET("/ai/history", controllers.HandleAIHistory())
+		api.GET("/ai/page-insights/:page", controllers.HandleAIPageInsights())
+		api.GET("/ai/entity-insights/:entityType/:entityId", controllers.HandleAIEntityInsights())
+
 		// System / observability
 		api.GET("/health", controllers.HandleHealth(db))
 		api.GET("/system/health", controllers.HandleSystemHealth(db))
