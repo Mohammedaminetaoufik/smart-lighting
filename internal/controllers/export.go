@@ -5,6 +5,7 @@ import (
 	"encoding/csv"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -154,6 +155,67 @@ func HandleExportAlerts(db *sql.DB) gin.HandlerFunc {
 				fmt.Sprintf("%d", id), ref, alertType, sev, status, msg,
 				createdAt.Format(time.RFC3339),
 				nullableTime(ackAt), nullableTime(resAt), nullableTime(closedAt),
+			})
+		}
+		w.Flush()
+	}
+}
+
+// HandleExportEnergy handles GET /api/export/energy?days=N
+// Returns a CSV with daily kWh, estimated, savings, cost and CO2.
+func HandleExportEnergy(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		days := 30
+		if d, err := strconv.Atoi(c.Query("days")); err == nil && d > 0 && d <= 365 {
+			days = d
+		}
+
+		const tariff = 1.20
+		const co2Coef = 0.52
+
+		rows, err := db.QueryContext(c.Request.Context(), `
+			SELECT
+				DATE(created_at)::text AS day,
+				COALESCE(
+					NULLIF(SUM(energie), 0),
+					SUM(puissance) * 5.0 / 60.0 / 1000.0
+				) AS kwh_real
+			FROM sensor_measurements
+			WHERE created_at >= NOW() - ($1 * INTERVAL '1 day')
+			  AND (energie IS NOT NULL OR puissance IS NOT NULL)
+			GROUP BY DATE(created_at)
+			ORDER BY day
+		`, days)
+		if err != nil {
+			RespondError(c, http.StatusInternalServerError, err.Error())
+			return
+		}
+		defer rows.Close()
+
+		byDate := map[string]float64{}
+		for rows.Next() {
+			var day string
+			var kwh float64
+			if rows.Scan(&day, &kwh) == nil {
+				byDate[day] = kwh
+			}
+		}
+
+		w := writeCSVHeader(c, "energie", []string{
+			"Date", "kWh réel", "kWh estimé (sans dimming)", "Économies kWh", "Coût DH", "CO2 évité kg",
+		})
+		for i := days - 1; i >= 0; i-- {
+			day := time.Now().AddDate(0, 0, -i).Format("2006-01-02")
+			real := byDate[day]
+			estimated := real * 1.38
+			savings := estimated - real
+			_ = w.Write([]string{
+				day,
+				fmt.Sprintf("%.3f", real),
+				fmt.Sprintf("%.3f", estimated),
+				fmt.Sprintf("%.3f", savings),
+				fmt.Sprintf("%.2f", real*tariff),
+				fmt.Sprintf("%.3f", savings*co2Coef),
 			})
 		}
 		w.Flush()

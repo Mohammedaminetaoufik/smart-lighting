@@ -248,11 +248,10 @@ func populateDriverFields(item *models.Lampadaire,
 	}
 }
 
-// ListLampadaires returns all non-archived lampadaires matching optional filters.
-func ListLampadaires(ctx context.Context, db *sql.DB, search map[string]string) ([]models.Lampadaire, error) {
-	archivedOnly := search["archived"] == "1"
+// buildLampadaireFilters builds the shared WHERE clause for list/count queries.
+func buildLampadaireFilters(search map[string]string) ([]string, []interface{}) {
 	where := []string{"archived_at IS NULL"}
-	if archivedOnly {
+	if search["archived"] == "1" {
 		where = []string{"archived_at IS NOT NULL"}
 	}
 	args := []interface{}{}
@@ -273,12 +272,34 @@ func ListLampadaires(ctx context.Context, db *sql.DB, search map[string]string) 
 		args = append(args, driver)
 		argID++
 	}
+	if comm := search["commissioning"]; comm != "" {
+		where = append(where, fmt.Sprintf("commissioning_status = $%d", argID))
+		args = append(args, comm)
+		argID++
+	}
 	if q := search["q"]; q != "" {
 		where = append(where, fmt.Sprintf("(reference ILIKE $%d OR address ILIKE $%d OR quartier ILIKE $%d)", argID, argID, argID))
 		args = append(args, "%"+q+"%")
 		argID++
 	}
-	_ = argID
+	return where, args
+}
+
+// CountLampadaires returns the total count matching the same filters as ListLampadaires.
+func CountLampadaires(ctx context.Context, db *sql.DB, search map[string]string) (int, error) {
+	where, args := buildLampadaireFilters(search)
+	var total int
+	err := db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM lampadaires WHERE "+strings.Join(where, " AND "),
+		args...,
+	).Scan(&total)
+	return total, err
+}
+
+// ListLampadaires returns non-archived lampadaires matching optional filters.
+// Pagination: if limit > 0, LIMIT/OFFSET are applied (use with CountLampadaires).
+func ListLampadaires(ctx context.Context, db *sql.DB, search map[string]string, limit, offset int) ([]models.Lampadaire, error) {
+	where, args := buildLampadaireFilters(search)
 
 	query := `
 		SELECT l.id, l.reference, l.latitude, l.longitude, l.zone, l.type_driver, l.protocole,
@@ -299,6 +320,10 @@ func ListLampadaires(ctx context.Context, db *sql.DB, search map[string]string) 
 		WHERE ` + strings.Join(where, " AND ") + `
 		ORDER BY l.id
 	`
+	if limit > 0 {
+		query += fmt.Sprintf(" LIMIT $%d OFFSET $%d", len(args)+1, len(args)+2)
+		args = append(args, limit, offset)
+	}
 
 	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {

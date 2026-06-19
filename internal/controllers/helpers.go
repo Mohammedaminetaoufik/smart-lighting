@@ -12,6 +12,7 @@ import (
 const (
 	errInvalidJSON = "JSON invalide: "
 	errInvalidID   = "ID invalide"
+	errDB          = "Erreur base de données"
 )
 
 // RespondJSON sends a JSON response with the given status code.

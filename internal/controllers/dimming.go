@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"database/sql"
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -71,6 +72,12 @@ func HandlePostDimming(db *sql.DB, adapter services.LCUAdapter) gin.HandlerFunc 
 
 		if lcuID.Valid && deviceUID.Valid && deviceUID.String != "" {
 			lcu, err := repository.GetLCUByID(c.Request.Context(), db, int(lcuID.Int64))
+			if err != nil {
+				// LCU introuvable : la commande sera appliquée en local uniquement —
+				// tracer pour ne pas masquer un problème de données.
+				log.Printf("[dimming] LCU id=%d introuvable pour lampadaire %d, commande appliquée sans envoi terrain: %v",
+					lcuID.Int64, id, err)
+			}
 			if err == nil {
 				err = adapter.ApplyDimming(c.Request.Context(), lcu, deviceUID.String, body.NewIntensity, body.Reason, body.Source)
 				if err != nil {

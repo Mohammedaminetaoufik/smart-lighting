@@ -101,7 +101,7 @@ func HandleBatchTest(db *sql.DB) gin.HandlerFunc {
 			body.Scope = "all"
 		}
 
-		lamps, err := repository.ListLampadaires(c.Request.Context(), db, map[string]string{})
+		lamps, err := repository.ListLampadaires(c.Request.Context(), db, map[string]string{}, 0, 0)
 		if err != nil {
 			RespondError(c, http.StatusInternalServerError, "Erreur base de données")
 			return

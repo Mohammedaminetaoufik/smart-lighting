@@ -128,6 +128,52 @@ func HandleGetAlertSummary(db *sql.DB) gin.HandlerFunc {
 	}
 }
 
+// HandleGetAlertTimeline handles GET /api/alerts/timeline.
+// Returns the count of alerts created per hour over the last 24 hours.
+func HandleGetAlertTimeline(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		type HourBucket struct {
+			HoursAgo int `json:"hours_ago"`
+			Count    int `json:"count"`
+			Critical int `json:"critical"`
+		}
+
+		rows, err := db.QueryContext(c.Request.Context(), `
+			SELECT
+				FLOOR(EXTRACT(EPOCH FROM (NOW() - created_at)) / 3600)::int AS hours_ago,
+				COUNT(*) AS cnt,
+				COUNT(*) FILTER (WHERE severity = 'critical') AS crit
+			FROM alerts
+			WHERE created_at >= NOW() - INTERVAL '24 hours'
+			GROUP BY hours_ago
+		`)
+		if err != nil {
+			RespondError(c, http.StatusInternalServerError, err.Error())
+			return
+		}
+		defer rows.Close()
+
+		byHour := map[int]HourBucket{}
+		for rows.Next() {
+			var b HourBucket
+			if rows.Scan(&b.HoursAgo, &b.Count, &b.Critical) == nil {
+				byHour[b.HoursAgo] = b
+			}
+		}
+
+		// Build a full 24-slot series, oldest first (23h ago → now)
+		result := make([]HourBucket, 0, 24)
+		for h := 23; h >= 0; h-- {
+			if b, ok := byHour[h]; ok {
+				result = append(result, b)
+			} else {
+				result = append(result, HourBucket{HoursAgo: h, Count: 0, Critical: 0})
+			}
+		}
+		RespondJSON(c, http.StatusOK, result)
+	}
+}
+
 // HandleAckAlert handles POST /api/alerts/:id/ack.
 func HandleAckAlert(db *sql.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {

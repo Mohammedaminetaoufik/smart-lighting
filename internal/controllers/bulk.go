@@ -25,8 +25,13 @@ func logBulkEvent(c *gin.Context, db *sql.DB, action string, ids []int, meta map
 	})
 }
 
-// validZones / commissioningSteps could be tightened later via a whitelist
 var validLampStates = map[string]bool{"online": true, "offline": true, "maintenance": true}
+
+// Doit rester aligné avec la contrainte chk_commissioning_status_v2 (schema.go)
+var validCommissioningStatuses = map[string]bool{
+	"discovered": true, "located": true, "configured": true,
+	"tested": true, "commissioned": true, "failed": true,
+}
 
 func intArrayPlaceholders(start, count int) string {
 	parts := make([]string, count)
@@ -42,6 +47,36 @@ func toAnySlice(ints []int) []any {
 		out[i] = v
 	}
 	return out
+}
+
+// buildLampadaireSetClause builds the SET clause for a bulk lampadaire update.
+// Returns an error message (empty = OK) so the handler can reply 400.
+func buildLampadaireSetClause(updates map[string]string) (setParts []string, args []any, errMsg string) {
+	argIdx := 1
+	if v, ok := updates["etat"]; ok {
+		if !validLampStates[v] {
+			return nil, nil, "etat invalide"
+		}
+		setParts = append(setParts, fmt.Sprintf("etat=$%d", argIdx))
+		args = append(args, v)
+		argIdx++
+	}
+	if v, ok := updates["zone"]; ok {
+		setParts = append(setParts, fmt.Sprintf("zone=$%d", argIdx))
+		args = append(args, v)
+		argIdx++
+	}
+	if v, ok := updates["commissioning_status"]; ok {
+		if !validCommissioningStatuses[v] {
+			return nil, nil, "commissioning_status invalide"
+		}
+		setParts = append(setParts, fmt.Sprintf("commissioning_status=$%d", argIdx))
+		args = append(args, v)
+	}
+	if len(setParts) == 0 {
+		return nil, nil, "aucun champ valide à mettre à jour"
+	}
+	return setParts, args, ""
 }
 
 // HandleBulkUpdateLampadaires handles PATCH /api/lampadaires/bulk.
@@ -64,32 +99,12 @@ func HandleBulkUpdateLampadaires(db *sql.DB) gin.HandlerFunc {
 			return
 		}
 
-		setParts := []string{}
-		args := []any{}
-		argIdx := 1
-		if v, ok := body.Updates["etat"]; ok {
-			if !validLampStates[v] {
-				RespondError(c, http.StatusBadRequest, "etat invalide")
-				return
-			}
-			setParts = append(setParts, fmt.Sprintf("etat=$%d", argIdx))
-			args = append(args, v)
-			argIdx++
-		}
-		if v, ok := body.Updates["zone"]; ok {
-			setParts = append(setParts, fmt.Sprintf("zone=$%d", argIdx))
-			args = append(args, v)
-			argIdx++
-		}
-		if v, ok := body.Updates["commissioning_status"]; ok {
-			setParts = append(setParts, fmt.Sprintf("commissioning_status=$%d", argIdx))
-			args = append(args, v)
-			argIdx++
-		}
-		if len(setParts) == 0 {
-			RespondError(c, http.StatusBadRequest, "aucun champ valide à mettre à jour")
+		setParts, args, errMsg := buildLampadaireSetClause(body.Updates)
+		if errMsg != "" {
+			RespondError(c, http.StatusBadRequest, errMsg)
 			return
 		}
+		argIdx := len(args) + 1
 		setParts = append(setParts, "updated_at=NOW()")
 
 		placeholders := intArrayPlaceholders(argIdx, len(body.IDs))

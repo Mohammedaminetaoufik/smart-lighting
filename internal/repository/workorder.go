@@ -179,7 +179,35 @@ func UpdateWorkOrderStatus(db *sql.DB, id int, status, note string) error {
 		OldStatus:   oldStatus,
 		NewStatus:   status,
 	})
+
+	// Sync linked maintenance window status automatically
+	syncMWStatus(db, id, status)
 	return nil
+}
+
+// syncMWStatus propagates a work order status change to its linked maintenance window.
+// - WO → in_progress  : if MW is still "planned", start it.
+// - WO → resolved/closed: if ALL WOs for the MW are done, complete the MW.
+func syncMWStatus(db *sql.DB, workOrderID int, newStatus string) {
+	var mwID sql.NullInt64
+	_ = db.QueryRow(`SELECT maintenance_window_id FROM work_orders WHERE id=$1`, workOrderID).Scan(&mwID)
+	if !mwID.Valid {
+		return
+	}
+	id := mwID.Int64
+	switch newStatus {
+	case "in_progress":
+		_, _ = db.Exec(`UPDATE maintenance_windows SET status='in_progress', updated_at=NOW()
+			WHERE id=$1 AND status='planned'`, id)
+	case "resolved", "closed":
+		var pending int
+		_ = db.QueryRow(`SELECT COUNT(*) FROM work_orders
+			WHERE maintenance_window_id=$1 AND status NOT IN ('resolved','closed','cancelled')`, id).Scan(&pending)
+		if pending == 0 {
+			_, _ = db.Exec(`UPDATE maintenance_windows SET status='completed', completed_at=NOW(), updated_at=NOW()
+				WHERE id=$1 AND status NOT IN ('completed','cancelled')`, id)
+		}
+	}
 }
 
 func statusToLogAction(status string) string {

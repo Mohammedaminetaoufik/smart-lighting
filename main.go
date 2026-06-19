@@ -66,6 +66,9 @@ func main() {
 			}
 			// Audit logs older than 1 year
 			db.ExecContext(ctx, "DELETE FROM access_logs WHERE created_at < NOW() - INTERVAL '1 year'")
+			// AI query logs older than 90 days (table created by the AI service —
+			// may not exist on first run, error ignored on purpose)
+			db.ExecContext(ctx, "DELETE FROM ai_query_logs WHERE created_at < NOW() - INTERVAL '90 days'")
 			services.Heartbeat(ctx, db, "data_retention", "ok", "")
 		}
 		// Run once at startup then daily
@@ -157,6 +160,7 @@ func main() {
 		api.GET("/alerts", controllers.HandleGetAlerts(db))
 		api.GET("/alerts/counts", controllers.HandleGetAlertCounts(db))
 		api.GET("/alerts/summary", controllers.HandleGetAlertSummary(db))
+		api.GET("/alerts/timeline", controllers.HandleGetAlertTimeline(db))
 		api.POST("/alerts/:id/resolve", controllers.HandleResolveAlert(db))
 
 		// Calculator API
@@ -170,6 +174,10 @@ func main() {
 		// Energy API
 		api.GET("/energy/summary", controllers.HandleGetEnergySummary(db))
 		api.GET("/energy/daily", controllers.HandleGetDailyEnergy(db))
+		api.GET("/energy/top-consumers", controllers.HandleGetEnergyTopConsumers(db))
+		api.GET("/energy/anomalies", controllers.HandleGetEnergyAnomalies(db))
+		api.GET("/energy/hourly", controllers.HandleGetEnergyHourly(db))
+		api.GET("/energy/recommendations", controllers.HandleGetEnergyRecommendations(db))
 
 		// Simulator API
 		api.POST("/simulator/telemetry/:id", controllers.HandleSimulateTelemetry(db))
@@ -247,6 +255,7 @@ func main() {
 		api.GET("/export/lampadaires", controllers.HandleExportLampadaires(db))
 		api.GET("/export/alerts", controllers.HandleExportAlerts(db))
 		api.GET("/export/workorders", controllers.HandleExportWorkOrders(db))
+		api.GET("/export/energy", controllers.HandleExportEnergy(db))
 
 		// Audit Log
 		api.GET("/audit-logs", controllers.HandleGetAuditLogs(db))
@@ -259,9 +268,13 @@ func main() {
 		// AI Service proxy
 		api.GET("/ai/health", controllers.HandleAIHealth())
 		api.POST("/ai/query", controllers.HandleAIQuery())
+		api.POST("/ai/query/stream", controllers.HandleAIQueryStream())
 		api.GET("/ai/history", controllers.HandleAIHistory())
 		api.GET("/ai/page-insights/:page", controllers.HandleAIPageInsights())
+		api.GET("/ai/suggestions", controllers.HandleAISuggestions())
+		api.GET("/ai/daily-digest", controllers.HandleAIDailyDigest())
 		api.GET("/ai/entity-insights/:entityType/:entityId", controllers.HandleAIEntityInsights())
+		api.GET("/ai/decision-center", controllers.HandleAIDecisionCenter())
 
 		// System / observability
 		api.GET("/health", controllers.HandleHealth(db))
@@ -282,9 +295,23 @@ func main() {
 		api.POST("/maintenance-windows/:id/cancel", controllers.HandleCancelMaintenanceWindow(db))
 		api.POST("/maintenance-windows/:id/complete", controllers.HandleCompleteMaintenanceWindow(db))
 		api.DELETE("/maintenance-windows/:id", controllers.HandleDeleteMaintenanceWindow(db))
+		api.GET("/maintenance-windows/:id/workorders", controllers.HandleGetMaintenanceWindowWorkOrders(db))
 
 		// CSV import
 		api.POST("/lampadaires/import", controllers.HandleImportLampadaires(db))
+	}
+
+	// Mobile API — technician app routes
+	mobile := router.Group("/api/mobile")
+	{
+		// AI diagnostic (proxied to FastAPI)
+		mobile.GET("/ai/missions", controllers.HandleAIMobileMissions())
+		mobile.GET("/ai/lampadaires/:id/diagnostic", controllers.HandleAIMobileDiagnosticLampadaire())
+		mobile.GET("/ai/lcus/:id/diagnostic", controllers.HandleAIMobileDiagnosticLCU())
+		mobile.GET("/ai/workorders/:id/diagnostic", controllers.HandleAIMobileDiagnosticWorkOrder())
+		// WorkOrder photos (handlers existed but were not wired)
+		mobile.POST("/workorders/:id/photos", controllers.HandleUploadWorkOrderPhoto(db))
+		mobile.GET("/workorders/:id/photos", controllers.HandleListWorkOrderPhotos(db))
 	}
 
 	port := os.Getenv("PORT")

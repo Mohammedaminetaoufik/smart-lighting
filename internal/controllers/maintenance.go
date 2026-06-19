@@ -231,31 +231,16 @@ func HandleGetUpcomingMaintenanceWindows(db *sql.DB) gin.HandlerFunc {
 
 const sqlLinkWorkOrder = "UPDATE maintenance_windows SET related_work_order_id=$1 WHERE id=$2"
 
-// ensureMaintenanceSourceConstraint makes 'maintenance_window' a valid source_type (idempotent).
-func ensureMaintenanceSourceConstraint(db *sql.DB) {
-	db.Exec(`
-		DO $$
-		BEGIN
-			IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_work_order_source_v3') THEN
-				ALTER TABLE work_orders DROP CONSTRAINT IF EXISTS chk_work_order_source_v2;
-				ALTER TABLE work_orders ADD CONSTRAINT chk_work_order_source_v3
-					CHECK (source_type IN ('alert','manual','system','calculator','maintenance_window'));
-			END IF;
-		END $$;
-	`)
-}
-
 // createLinkedWorkOrder inserts a work_order tied to a maintenance window and links it back.
 // Returns (workOrderID, error). On success it also writes related_work_order_id on the window.
 func createLinkedWorkOrder(db *sql.DB, ac services.AuditCtx, windowID int, title, reason, zone string) (int, error) {
-	ensureMaintenanceSourceConstraint(db)
 
 	var woID int
 	err := db.QueryRow(`
 		INSERT INTO work_orders
 			(title, description, status, source_type, maintenance_window_id,
 			 zone, equipment_type, created_by, updated_at)
-		VALUES ($1, $2, 'open', 'maintenance_window', $3, NULLIF($4,''), 'lampadaire', $5, NOW())
+		VALUES ($1, $2, 'open', 'manual', $3, NULLIF($4,''), 'lampadaire', $5, NOW())
 		RETURNING id`,
 		firstNonEmpty(title, "Maintenance #"+strconv.Itoa(windowID)),
 		reason, windowID, zone, ac.UserID,
@@ -355,24 +340,12 @@ func HandleCreateMaintenanceWindow(db *sql.DB) gin.HandlerFunc {
 		if body.CreateWorkOrder {
 			woTitle := firstNonEmpty(body.Title, "Maintenance: "+body.MaintenanceType)
 
-			// Ensure constraint allows 'maintenance_window' (idempotent)
-			db.ExecContext(c.Request.Context(), `
-				DO $$
-				BEGIN
-					IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_work_order_source_v3') THEN
-						ALTER TABLE work_orders DROP CONSTRAINT IF EXISTS chk_work_order_source_v2;
-						ALTER TABLE work_orders ADD CONSTRAINT chk_work_order_source_v3
-							CHECK (source_type IN ('alert','manual','system','calculator','maintenance_window'));
-					END IF;
-				END $$;
-			`)
-
 			var woID int
 			woErr := db.QueryRowContext(c.Request.Context(), `
 				INSERT INTO work_orders
 					(title, description, status, source_type, maintenance_window_id,
 					 zone, equipment_type, created_by, updated_at)
-				VALUES ($1, $2, 'open', 'maintenance_window', $3, NULLIF($4,''), 'lampadaire', $5, NOW())
+				VALUES ($1, $2, 'open', 'manual', $3, NULLIF($4,''), 'lampadaire', $5, NOW())
 				RETURNING id`,
 				woTitle, body.Reason, id, body.Zone, ac.UserID,
 			).Scan(&woID)
@@ -487,24 +460,12 @@ func HandleUpdateMaintenanceWindow(db *sql.DB) gin.HandlerFunc {
 			woReason := firstNonEmpty(body.Reason, curReason.String)
 			woZone := curZone.String // zone from the pre-fetch
 
-			// Ensure 'maintenance_window' is an accepted source_type (idempotent)
-			db.ExecContext(c.Request.Context(), `
-				DO $$
-				BEGIN
-					IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_work_order_source_v3') THEN
-						ALTER TABLE work_orders DROP CONSTRAINT IF EXISTS chk_work_order_source_v2;
-						ALTER TABLE work_orders ADD CONSTRAINT chk_work_order_source_v3
-							CHECK (source_type IN ('alert','manual','system','calculator','maintenance_window'));
-					END IF;
-				END $$;
-			`)
-
 			var woID int
 			woErr := db.QueryRowContext(c.Request.Context(), `
 				INSERT INTO work_orders
 					(title, description, status, source_type, maintenance_window_id,
 					 zone, equipment_type, created_by, updated_at)
-				VALUES ($1, $2, 'open', 'maintenance_window', $3, NULLIF($4,''), 'lampadaire', $5, NOW())
+				VALUES ($1, $2, 'open', 'manual', $3, NULLIF($4,''), 'lampadaire', $5, NOW())
 				RETURNING id`,
 				woTitle, woReason, id, woZone, ac.UserID,
 			).Scan(&woID)
@@ -676,6 +637,59 @@ func nilIfZeroTime(t time.Time) interface{} {
 		return nil
 	}
 	return t
+}
+
+// HandleGetMaintenanceWindowWorkOrders handles GET /api/maintenance-windows/:id/workorders.
+// Returns all work orders linked to a given maintenance window.
+func HandleGetMaintenanceWindowWorkOrders(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, err := ParseIDParam(c, "id")
+		if err != nil {
+			RespondError(c, http.StatusBadRequest, "ID invalide")
+			return
+		}
+		rows, err := db.QueryContext(c.Request.Context(), `
+			SELECT wo.id, wo.title, wo.priority, wo.status,
+			       COALESCE(wo.assigned_to_name,'') AS assigned_to_name,
+			       COALESCE(wo.zone,'') AS zone,
+			       COALESCE(wo.equipment_reference,'') AS equipment_reference,
+			       wo.created_at, wo.updated_at
+			FROM work_orders wo
+			WHERE wo.maintenance_window_id = $1
+			ORDER BY
+			  CASE wo.priority WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 ELSE 4 END,
+			  wo.created_at DESC`, id)
+		if err != nil {
+			RespondError(c, http.StatusInternalServerError, "Erreur base de données")
+			return
+		}
+		defer rows.Close()
+		type woRow struct {
+			ID                 int       `json:"id"`
+			Title              string    `json:"title"`
+			Priority           string    `json:"priority"`
+			Status             string    `json:"status"`
+			AssignedToName     string    `json:"assigned_to_name"`
+			Zone               string    `json:"zone"`
+			EquipmentReference string    `json:"equipment_reference"`
+			CreatedAt          time.Time `json:"created_at"`
+			UpdatedAt          time.Time `json:"updated_at"`
+		}
+		var list []woRow
+		for rows.Next() {
+			var r woRow
+			if err := rows.Scan(&r.ID, &r.Title, &r.Priority, &r.Status,
+				&r.AssignedToName, &r.Zone, &r.EquipmentReference,
+				&r.CreatedAt, &r.UpdatedAt); err != nil {
+				continue
+			}
+			list = append(list, r)
+		}
+		if list == nil {
+			list = []woRow{}
+		}
+		RespondJSON(c, http.StatusOK, list)
+	}
 }
 
 func firstNonEmpty(vals ...string) string {

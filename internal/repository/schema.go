@@ -722,10 +722,54 @@ func ensureSchemaV5(db *sql.DB) error {
 			END IF;
 		END $$;
 
+		-- Étendre les sources de dimming autorisées : ajout de 'technicien_mobile'
+		ALTER TABLE dimming_commands DROP CONSTRAINT IF EXISTS check_dimming_source;
+		ALTER TABLE dimming_commands ADD CONSTRAINT check_dimming_source
+			CHECK (source IN ('admin', 'calculateur_intelligent', 'profile_eclairage', 'simulation', 'technicien_mobile'));
+
 		CREATE INDEX IF NOT EXISTS idx_maintenance_status ON maintenance_windows(status);
 		CREATE INDEX IF NOT EXISTS idx_maintenance_start ON maintenance_windows(start_at);
 		CREATE INDEX IF NOT EXISTS idx_maintenance_end ON maintenance_windows(end_at);
 		CREATE INDEX IF NOT EXISTS idx_alerts_maintenance ON alerts(maintenance_window_id) WHERE maintenance_window_id IS NOT NULL;
 	`)
+	if err != nil {
+		return err
+	}
+	return ensureSchemaV6(db)
+}
+
+func ensureSchemaV6(db *sql.DB) error {
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS work_order_photos (
+			id SERIAL PRIMARY KEY,
+			work_order_id INT NOT NULL,
+			technician_id INT NOT NULL,
+			file_path TEXT NOT NULL,
+			created_at TIMESTAMPTZ DEFAULT NOW()
+		);
+		CREATE INDEX IF NOT EXISTS idx_work_order_photos_wo ON work_order_photos(work_order_id);
+		CREATE INDEX IF NOT EXISTS idx_work_order_photos_tech ON work_order_photos(technician_id);
+	`)
+	if err != nil {
+		return err
+	}
+	return ensureSchemaV7(db)
+}
+
+// ensureSchemaV7 migrates source_type constraint to include 'maintenance_window'.
+// Runs in isolation so the error is never silently swallowed.
+func ensureSchemaV7(db *sql.DB) error {
+	// Fast path: v3 already applied.
+	var exists bool
+	_ = db.QueryRow(`SELECT EXISTS(SELECT 1 FROM pg_constraint WHERE conname='chk_work_order_source_v3')`).Scan(&exists)
+	if exists {
+		return nil
+	}
+	_, err := db.Exec(`ALTER TABLE work_orders DROP CONSTRAINT IF EXISTS chk_work_order_source_v2`)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(`ALTER TABLE work_orders ADD CONSTRAINT chk_work_order_source_v3
+		CHECK (source_type IN ('alert','manual','system','calculator','maintenance_window'))`)
 	return err
 }

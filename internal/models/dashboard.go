@@ -36,6 +36,7 @@ type EnergySummary struct {
 	EstimatedCurrentPowerW float64              `json:"estimated_current_power_w"`
 	EstimatedSavingW       float64              `json:"estimated_saving_w"`
 	EstimatedSavingPercent float64              `json:"estimated_saving_percent"`
+	AvgIntensityPercent    float64              `json:"avg_intensity"`
 	ByZone                 []EnergyZoneSummary  `json:"by_zone"`
 }
 

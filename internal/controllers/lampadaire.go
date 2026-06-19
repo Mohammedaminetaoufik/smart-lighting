@@ -172,28 +172,71 @@ func HandlePatchLampadaireJSON(db *sql.DB) gin.HandlerFunc {
 	}
 }
 
-// HandleListLampadairesJSON handles GET /api/lampadaires — lists all non-archived lampadaires.
+// parseLampadaireFilters extracts the supported filter query params.
+func parseLampadaireFilters(c *gin.Context) map[string]string {
+	filters := map[string]string{}
+	for _, key := range []string{"etat", "zone", "commissioning", "q"} {
+		if v := c.Query(key); v != "" {
+			filters[key] = v
+		}
+	}
+	return filters
+}
+
+// parsePagination returns (limit, offset). limit=0 means "no pagination requested".
+func parsePagination(c *gin.Context) (int, int) {
+	limitStr := c.Query("limit")
+	if limitStr == "" {
+		return 0, 0
+	}
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil || limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	offset, _ := strconv.Atoi(c.Query("offset"))
+	if offset < 0 {
+		offset = 0
+	}
+	return limit, offset
+}
+
+// HandleListLampadairesJSON handles GET /api/lampadaires.
+// Sans paramètre `limit` : retourne un tableau nu (compat MapPage/Dashboard/Import).
+// Avec `limit` : retourne une enveloppe paginée {items, total, limit, offset}.
 func HandleListLampadairesJSON(db *sql.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		filters := map[string]string{}
-		if etat := c.Query("etat"); etat != "" {
-			filters["etat"] = etat
-		}
-		if zone := c.Query("zone"); zone != "" {
-			filters["zone"] = zone
-		}
-		if q := c.Query("q"); q != "" {
-			filters["q"] = q
-		}
-		lamps, err := repository.ListLampadaires(c.Request.Context(), db, filters)
+		filters := parseLampadaireFilters(c)
+		limit, offset := parsePagination(c)
+
+		lamps, err := repository.ListLampadaires(c.Request.Context(), db, filters, limit, offset)
 		if err != nil {
-			RespondError(c, http.StatusInternalServerError, "Erreur base de données")
+			RespondError(c, http.StatusInternalServerError, errDB)
 			return
 		}
 		if lamps == nil {
 			lamps = []models.Lampadaire{}
 		}
-		RespondJSON(c, http.StatusOK, lamps)
+
+		if limit == 0 {
+			// Mode legacy : tableau complet
+			RespondJSON(c, http.StatusOK, lamps)
+			return
+		}
+
+		total, err := repository.CountLampadaires(c.Request.Context(), db, filters)
+		if err != nil {
+			RespondError(c, http.StatusInternalServerError, errDB)
+			return
+		}
+		RespondJSON(c, http.StatusOK, gin.H{
+			"items":  lamps,
+			"total":  total,
+			"limit":  limit,
+			"offset": offset,
+		})
 	}
 }
 
@@ -231,7 +274,7 @@ func HandleListMissingLocation(db *sql.DB) gin.HandlerFunc {
 // HandleGetMissingLocationLampadaires handles lampadaires with missing/estimated locations.
 func HandleGetMissingLocationLampadaires(db *sql.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		lampadaires, err := repository.ListLampadaires(c.Request.Context(), db, map[string]string{})
+		lampadaires, err := repository.ListLampadaires(c.Request.Context(), db, map[string]string{}, 0, 0)
 		if err != nil {
 			RespondError(c, http.StatusInternalServerError, "Erreur base de donnees")
 			return
@@ -395,7 +438,7 @@ func RenderIndex(c *gin.Context, db *sql.DB, data models.PageData) {
 		"q":      c.Query("q"),
 	}
 
-	lampadaires, err := repository.ListLampadaires(c.Request.Context(), db, search)
+	lampadaires, err := repository.ListLampadaires(c.Request.Context(), db, search, 0, 0)
 	if err != nil {
 		c.String(http.StatusInternalServerError, "Erreur base de donnees")
 		return
@@ -404,7 +447,7 @@ func RenderIndex(c *gin.Context, db *sql.DB, data models.PageData) {
 		lampadaires = []models.Lampadaire{}
 	}
 
-	archived, err := repository.ListLampadaires(c.Request.Context(), db, map[string]string{"archived": "1"})
+	archived, err := repository.ListLampadaires(c.Request.Context(), db, map[string]string{"archived": "1"}, 0, 0)
 	if err != nil {
 		archived = []models.Lampadaire{}
 	}

@@ -100,10 +100,11 @@ func GetEnergySummary(ctx context.Context, db *sql.DB) (*models.EnergySummary, e
 		SELECT
 			COALESCE(SUM(puissance), 0),
 			COALESCE(SUM(puissance * intensite / 100.0), 0),
-			COALESCE(SUM(puissance - (puissance * intensite / 100.0)), 0)
+			COALESCE(SUM(puissance - (puissance * intensite / 100.0)), 0),
+			COALESCE(AVG(intensite), 0)
 		FROM lampadaires
 		WHERE archived_at IS NULL AND puissance IS NOT NULL
-	`).Scan(&summary.TotalNominalPowerW, &summary.EstimatedCurrentPowerW, &summary.EstimatedSavingW)
+	`).Scan(&summary.TotalNominalPowerW, &summary.EstimatedCurrentPowerW, &summary.EstimatedSavingW, &summary.AvgIntensityPercent)
 
 	if err != nil {
 		return nil, err
