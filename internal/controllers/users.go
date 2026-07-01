@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"golang.org/x/crypto/bcrypt"
 
 	"map-interactif/internal/models"
 	"map-interactif/internal/repository"
@@ -106,33 +107,52 @@ func HandleGetUser(db *sql.DB) gin.HandlerFunc {
 	}
 }
 
+type createUserRequest struct {
+	models.User
+	Password string `json:"password"`
+}
+
 // HandleCreateUser handles POST /api/users.
 func HandleCreateUser(db *sql.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		var u models.User
-		if !BindRequiredJSON(c, &u) {
+		var req createUserRequest
+		if !BindRequiredJSON(c, &req) {
 			return
 		}
-		if msg := validateUserPayload(&u); msg != "" {
+		if req.Password == "" {
+			RespondError(c, http.StatusBadRequest, "Le mot de passe est obligatoire")
+			return
+		}
+		if len(req.Password) < 8 {
+			RespondError(c, http.StatusBadRequest, "Le mot de passe doit contenir au moins 8 caractères")
+			return
+		}
+		if msg := validateUserPayload(&req.User); msg != "" {
 			RespondError(c, http.StatusBadRequest, msg)
 			return
 		}
-		if !checkEmailAvailable(c, db, u.Email, 0) {
+		if !checkEmailAvailable(c, db, req.Email, 0) {
 			return
 		}
-		id, err := repository.InsertUser(c.Request.Context(), db, u)
+		hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), 10)
+		if err != nil {
+			RespondError(c, http.StatusInternalServerError, "Erreur hachage mot de passe")
+			return
+		}
+		req.User.PasswordHash = string(hash)
+		id, err := repository.InsertUser(c.Request.Context(), db, req.User)
 		if err != nil {
 			RespondError(c, http.StatusInternalServerError, "Erreur création: "+err.Error())
 			return
 		}
-		u.ID = id
+		req.User.ID = id
 		services.LogAudit(c.Request.Context(), db, services.AuditLogInput{
 			Action: "user_created", EntityType: "user", EntityID: &id,
-			Description: "Utilisateur créé : " + u.Email,
-			NewValues: map[string]any{"email": u.Email, "role": u.Role, "status": u.Status},
+			Description: "Utilisateur créé : " + req.Email,
+			NewValues: map[string]any{"email": req.Email, "role": req.Role, "status": req.Status},
 			IPAddress: c.ClientIP(), UserAgent: c.Request.UserAgent(),
 		})
-		RespondJSON(c, http.StatusCreated, u)
+		RespondJSON(c, http.StatusCreated, req.User)
 	}
 }
 

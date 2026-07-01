@@ -15,6 +15,7 @@ import (
 	"github.com/joho/godotenv"
 
 	"map-interactif/internal/controllers"
+	"map-interactif/internal/middleware"
 	"map-interactif/internal/repository"
 	"map-interactif/internal/services"
 )
@@ -94,15 +95,25 @@ func main() {
 	router.POST("/lampadaires/:id/archive", controllers.HandleArchiveLampadaire(db))
 	router.POST("/lampadaires/:id/restore", controllers.HandleRestoreLampadaire(db))
 
-	// JSON API
-	api := router.Group("/api")
+	// Auth routes (public — no JWT required)
+	authGroup := router.Group("/api/auth")
 	{
-		// Users & Logs
+		authGroup.POST("/login", controllers.HandleLogin(db))
+		// Protected auth routes
+		authGroup.GET("/me", middleware.JWTMiddleware(), controllers.HandleMe())
+		authGroup.POST("/change-password", middleware.JWTMiddleware(), controllers.HandleChangePassword(db))
+		authGroup.POST("/admin/reset-password", middleware.JWTMiddleware(), middleware.RequireRole("admin"), controllers.HandleAdminResetPassword(db))
+	}
+
+	// JSON API — all routes require authentication
+	api := router.Group("/api", middleware.JWTMiddleware())
+	{
+		// Users & Logs — write operations restricted to admin
 		api.GET("/users", controllers.HandleGetUsers(db))
-		api.POST("/users", controllers.HandleCreateUser(db))
+		api.POST("/users", middleware.RequireRole("admin"), controllers.HandleCreateUser(db))
 		api.GET("/users/:id", controllers.HandleGetUser(db))
-		api.PATCH("/users/:id", controllers.HandleUpdateUser(db))
-		api.DELETE("/users/:id", controllers.HandleDeleteUser(db))
+		api.PATCH("/users/:id", middleware.RequireRole("admin"), controllers.HandleUpdateUser(db))
+		api.DELETE("/users/:id", middleware.RequireRole("admin"), controllers.HandleDeleteUser(db))
 		api.GET("/logs", controllers.HandleGetLogs(db))
 
 		// LCU API
@@ -301,8 +312,8 @@ func main() {
 		api.POST("/lampadaires/import", controllers.HandleImportLampadaires(db))
 	}
 
-	// Mobile API — technician app routes
-	mobile := router.Group("/api/mobile")
+	// Mobile API — technician app routes (JWT required)
+	mobile := router.Group("/api/mobile", middleware.JWTMiddleware())
 	{
 		// AI diagnostic (proxied to FastAPI)
 		mobile.GET("/ai/missions", controllers.HandleAIMobileMissions())

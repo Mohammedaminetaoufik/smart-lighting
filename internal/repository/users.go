@@ -61,12 +61,21 @@ func EmailExists(ctx context.Context, db *sql.DB, email string, excludeID int) (
 }
 
 // InsertUser inserts a new user and returns the new ID.
+// u.PasswordHash must already be a bcrypt hash if provided.
 func InsertUser(ctx context.Context, db *sql.DB, u models.User) (int, error) {
 	var id int
-	err := db.QueryRowContext(ctx, `
-		INSERT INTO users (full_name, email, role, status)
-		VALUES ($1, $2, $3, $4) RETURNING id`,
-		u.FullName, u.Email, u.Role, u.Status).Scan(&id)
+	var err error
+	if u.PasswordHash != "" {
+		err = db.QueryRowContext(ctx, `
+			INSERT INTO users (full_name, email, password_hash, role, status)
+			VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+			u.FullName, u.Email, u.PasswordHash, u.Role, u.Status).Scan(&id)
+	} else {
+		err = db.QueryRowContext(ctx, `
+			INSERT INTO users (full_name, email, role, status)
+			VALUES ($1, $2, $3, $4) RETURNING id`,
+			u.FullName, u.Email, u.Role, u.Status).Scan(&id)
+	}
 	return id, err
 }
 

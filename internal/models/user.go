@@ -3,13 +3,14 @@ package models
 import "time"
 
 type User struct {
-	ID          int        `json:"id"`
-	FullName    string     `json:"full_name"`
-	Email       string     `json:"email"`
-	Role        string     `json:"role"`
-	Status      string     `json:"status"`
-	LastLoginAt *time.Time `json:"last_login_at,omitempty"`
-	CreatedAt   time.Time  `json:"created_at"`
+	ID           int        `json:"id"`
+	FullName     string     `json:"full_name"`
+	Email        string     `json:"email"`
+	PasswordHash string     `json:"-"`
+	Role         string     `json:"role"`
+	Status       string     `json:"status"`
+	LastLoginAt  *time.Time `json:"last_login_at,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
 }
 
 type SystemSetting struct {

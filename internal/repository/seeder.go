@@ -7,6 +7,8 @@ import (
 	"log"
 	"math/rand"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 // SeedMockDataIfEmpty checks if tables are empty and seeds them with beautiful initial data.
@@ -21,13 +23,25 @@ func SeedMockDataIfEmpty(db *sql.DB) error {
 	}
 	if userCount == 0 {
 		log.Println("Seeding default admin user...")
+		defaultHash, hashErr := bcrypt.GenerateFromPassword([]byte("Admin2024!"), 10)
+		if hashErr != nil {
+			return fmt.Errorf("error hashing default password: %w", hashErr)
+		}
 		_, err = db.ExecContext(ctx, `
 			INSERT INTO users (full_name, email, password_hash, role, status)
-			VALUES ('Admin Lamalif', 'admin@lamalif.ma', '$2a$10$wB5V0E/l0jK1oFfS7MhBie3Koxk25YFqI0kR.qU8r5Tqf5v5q9G6G', 'admin', 'active')
-		`)
+			VALUES ('Admin Lamalif', 'admin@lamalif.ma', $1, 'admin', 'active')
+		`, string(defaultHash))
 		if err != nil {
 			return fmt.Errorf("error seeding user: %w", err)
 		}
+	} else {
+		// Reset existing admin to known password if it still has the old hardcoded hash
+		newHash, _ := bcrypt.GenerateFromPassword([]byte("Admin2024!"), 10)
+		db.ExecContext(ctx, `
+			UPDATE users SET password_hash=$1
+			WHERE email='admin@lamalif.ma'
+			AND password_hash='$2a$10$wB5V0E/l0jK1oFfS7MhBie3Koxk25YFqI0kR.qU8r5Tqf5v5q9G6G'
+		`, string(newHash))
 	}
 
 	// 2. Seed lampadaires if empty
