@@ -196,7 +196,7 @@ func EnsureSchema(db *sql.DB) error {
 			full_name TEXT NOT NULL,
 			email TEXT NOT NULL UNIQUE,
 			password_hash TEXT,
-			role TEXT NOT NULL DEFAULT 'admin',
+			role TEXT NOT NULL DEFAULT 'operator',
 			status TEXT NOT NULL DEFAULT 'active',
 			created_at TIMESTAMP NOT NULL DEFAULT NOW(),
 			updated_at TIMESTAMP NOT NULL DEFAULT NOW()
@@ -279,7 +279,126 @@ func EnsureSchema(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
-	return ensureSchemaV2(db)
+	if err := ensureSchemaV2(db); err != nil {
+		return err
+	}
+	if err := ensureSchemaFinance(db); err != nil {
+		return err
+	}
+	if err := ensureSchemaDimmingRef(db); err != nil {
+		return err
+	}
+	return ensureSchemaFaults(db)
+}
+
+// ensureSchemaFaults crée le schéma de maintenance prédictive : colonne
+// courant_env (feature de la panne de fuite), historique fault_events, et
+// seuils configurables fault_thresholds. Rempli par tools/import-faults et par
+// le classifieur live (services/fault_predict.go).
+func ensureSchemaFaults(db *sql.DB) error {
+	_, err := db.Exec(`
+		ALTER TABLE sensor_measurements ADD COLUMN IF NOT EXISTS courant_env DOUBLE PRECISION;
+
+		CREATE TABLE IF NOT EXISTS fault_events (
+			id            SERIAL PRIMARY KEY,
+			lampadaire_id INTEGER NOT NULL REFERENCES lampadaires(id) ON DELETE CASCADE,
+			fault_type    INTEGER NOT NULL,            -- 0..4
+			label         TEXT NOT NULL,
+			confidence    DOUBLE PRECISION NOT NULL DEFAULT 1.0,
+			puissance     DOUBLE PRECISION,
+			tension       DOUBLE PRECISION,
+			courant       DOUBLE PRECISION,
+			courant_env   DOUBLE PRECISION,
+			temperature   DOUBLE PRECISION,
+			weather       TEXT,
+			source        TEXT NOT NULL DEFAULT 'live', -- 'fault_dataset' | 'live'
+			created_at    TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+		);
+		CREATE INDEX IF NOT EXISTS idx_fault_events_lamp ON fault_events(lampadaire_id);
+		CREATE INDEX IF NOT EXISTS idx_fault_events_type ON fault_events(fault_type);
+		CREATE INDEX IF NOT EXISTS idx_fault_events_created ON fault_events(created_at DESC);
+
+		CREATE TABLE IF NOT EXISTS fault_thresholds (
+			key         TEXT PRIMARY KEY,
+			value       DOUBLE PRECISION NOT NULL,
+			label       TEXT NOT NULL,
+			updated_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+		);
+
+		-- Seuils par défaut dérivés du dataset (configurables).
+		INSERT INTO fault_thresholds (key, value, label) VALUES
+			('overcurrent_a',   4.0,  'Surintensité — courant (A) au-delà duquel une surintensité est signalée'),
+			('overvoltage_v',   233.0,'Surtension — tension (V) au-delà de laquelle une surtension est signalée'),
+			('underpower_ratio',0.70, 'Sous-consommation — ratio puissance mesurée / puissance attendue en dessous duquel une déplétion est signalée'),
+			('leakage_a',       4.0,  'Fuite de courant — courant environnemental (A) au-delà duquel une fuite est signalée')
+		ON CONFLICT (key) DO NOTHING;
+	`)
+	return err
+}
+
+// ensureSchemaDimmingRef crée la table de référence de dimming apprise du
+// dataset (conditions → intensité recommandée). Remplie par l'outil
+// tools/import-telemetry ; consultée par le calculateur data-driven.
+func ensureSchemaDimmingRef(db *sql.DB) error {
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS dimming_reference (
+			hour                  INTEGER NOT NULL CHECK (hour BETWEEN 0 AND 23),
+			lux_bucket            TEXT NOT NULL,      -- 'nuit' | 'crepuscule' | 'jour'
+			presence              BOOLEAN NOT NULL,
+			weather               TEXT NOT NULL,
+			recommended_brightness DOUBLE PRECISION NOT NULL,
+			sample_count          INTEGER NOT NULL DEFAULT 0,
+			updated_at            TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+			PRIMARY KEY (hour, lux_bucket, presence, weather)
+		);
+	`)
+	return err
+}
+
+// ensureSchemaFinance crée les tables de tarification énergétique (ONEE) et de
+// facturation. Modèle : 3 postes horaires (pointe/pleines/creuses) avec un prix
+// DH/kWh, + un mapping des 24 heures vers un poste. Les valeurs par défaut sont
+// indicatives et DOIVENT être ajustées selon le contrat ONEE réel via l'UI.
+func ensureSchemaFinance(db *sql.DB) error {
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS energy_tariffs (
+			period_key        TEXT PRIMARY KEY,      -- 'peak' | 'full' | 'off'
+			label             TEXT NOT NULL,
+			price_dh_per_kwh  DOUBLE PRECISION NOT NULL DEFAULT 0,
+			color             TEXT NOT NULL DEFAULT '#3b82f6',
+			sort_order        INTEGER NOT NULL DEFAULT 0,
+			updated_at        TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+		);
+
+		CREATE TABLE IF NOT EXISTS energy_tariff_hours (
+			hour        INTEGER PRIMARY KEY CHECK (hour BETWEEN 0 AND 23),
+			period_key  TEXT NOT NULL REFERENCES energy_tariffs(period_key) ON UPDATE CASCADE
+		);
+
+		-- Postes par défaut (tarification ONEE indicative — à ajuster)
+		INSERT INTO energy_tariffs (period_key, label, price_dh_per_kwh, color, sort_order) VALUES
+			('peak', 'Heures de pointe', 1.40, '#ef4444', 1),
+			('full', 'Heures pleines',   1.10, '#f59e0b', 2),
+			('off',  'Heures creuses',   0.75, '#22c55e', 3)
+		ON CONFLICT (period_key) DO NOTHING;
+
+		-- Mapping horaire par défaut : pointe 18-21, pleines 7-17, creuses 22-6
+		INSERT INTO energy_tariff_hours (hour, period_key)
+		SELECT h, CASE
+			WHEN h BETWEEN 18 AND 21 THEN 'peak'
+			WHEN h BETWEEN 7  AND 17 THEN 'full'
+			ELSE 'off'
+		END
+		FROM generate_series(0, 23) AS h
+		ON CONFLICT (hour) DO NOTHING;
+
+		-- Réglages financiers globaux (facteur CO2 réseau, devise)
+		INSERT INTO system_settings (key, value) VALUES
+			('co2_factor_kg_per_kwh', '0.70'),
+			('currency', 'DH')
+		ON CONFLICT (key) DO NOTHING;
+	`)
+	return err
 }
 
 func ensureSchemaV2(db *sql.DB) error {

@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -24,7 +23,7 @@ type loginRequest struct {
 
 // HandleLogin handles POST /api/auth/login.
 func HandleLogin(db *sql.DB) gin.HandlerFunc {
-	secret := []byte(os.Getenv("JWT_SECRET"))
+	secret := middleware.JWTSecret()
 	return func(c *gin.Context) {
 		var req loginRequest
 		if !BindRequiredJSON(c, &req) {

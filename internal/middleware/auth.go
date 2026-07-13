@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -19,9 +20,20 @@ type AuthClaims struct {
 	jwt.RegisteredClaims
 }
 
+// JWTSecret returns the configured signing secret. The server refuses to start
+// without one — signing/verifying with an empty key would silently accept forged
+// tokens. Called at startup (route wiring), so a missing secret fails fast.
+func JWTSecret() []byte {
+	s := os.Getenv("JWT_SECRET")
+	if s == "" {
+		log.Fatal("JWT_SECRET manquant : le serveur refuse de démarrer (sécurité JWT).")
+	}
+	return []byte(s)
+}
+
 // JWTMiddleware validates the Bearer token and injects user info into the Gin context.
 func JWTMiddleware() gin.HandlerFunc {
-	secret := []byte(os.Getenv("JWT_SECRET"))
+	secret := JWTSecret()
 	return func(c *gin.Context) {
 		header := c.GetHeader("Authorization")
 		if !strings.HasPrefix(header, "Bearer ") {

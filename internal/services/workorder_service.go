@@ -71,6 +71,39 @@ func DiagnoseAlert(a *models.Alert) AlertDiagnosis {
 		d.ShouldCreateWorkOrder = true
 		d.IsAutoCreate = a.Severity == "critical"
 
+	// ── Maintenance prédictive : pannes électriques classées ──
+	case "fault_overcurrent":
+		d.ProbableCause = "Surintensité — court-circuit partiel ou surcharge du driver"
+		d.RecommendedAction = "Vérifier le driver et le câblage — intervention prioritaire"
+		d.Priority = "urgent"
+		d.TeamType = "electrical"
+		d.ShouldCreateWorkOrder = true
+		d.IsAutoCreate = true
+
+	case "fault_overvoltage":
+		d.ProbableCause = "Surtension réseau — dégradation accélérée des condensateurs du driver"
+		d.RecommendedAction = "Vérifier la tension d'alimentation et l'état du driver"
+		d.Priority = "high"
+		d.TeamType = "electrical"
+		d.ShouldCreateWorkOrder = true
+		d.IsAutoCreate = a.Severity == "critical"
+
+	case "fault_underpower":
+		d.ProbableCause = "Sous-consommation — déplétion des LED ou driver en fin de vie"
+		d.RecommendedAction = "Planifier le remplacement préventif du luminaire"
+		d.Priority = "medium"
+		d.TeamType = "lighting"
+		d.ShouldCreateWorkOrder = true
+		d.IsAutoCreate = false
+
+	case "fault_leakage":
+		d.ProbableCause = "Fuite de courant — défaut d'isolation (souvent aggravé par l'humidité)"
+		d.RecommendedAction = "Contrôler l'isolation et la mise à la terre — risque électrique"
+		d.Priority = "urgent"
+		d.TeamType = "electrical"
+		d.ShouldCreateWorkOrder = true
+		d.IsAutoCreate = true
+
 	case "low_signal", "weak_signal":
 		d.ProbableCause = "Qualité du signal radio insuffisante — obstacles ou distance trop grande"
 		d.RecommendedAction = "Repositionner l'antenne ou ajouter un répéteur réseau"

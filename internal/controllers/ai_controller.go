@@ -23,13 +23,36 @@ func getAIServiceURL() string {
 	return "http://localhost:8090"
 }
 
+// getAIInternalToken returns the shared secret sent to the FastAPI service so it
+// can verify the request comes from this authenticated backend (not a direct caller).
+func getAIInternalToken() string {
+	return os.Getenv("AI_INTERNAL_TOKEN")
+}
+
 var aiHTTPClient = &http.Client{
-	Timeout: 60 * time.Second,
+	// Le pipeline NL→SQL enchaîne 2 appels LLM (génération SQL + réponse) sur un
+	// gros modèle → prévoir de la marge au-delà de 60 s.
+	Timeout: 120 * time.Second,
+}
+
+// forwardIdentity attaches the authenticated user's id/name (set by the JWT
+// middleware) so the AI service can attribute queries and feedback.
+func forwardIdentity(c *gin.Context, req *http.Request) {
+	if uid := c.GetString("user_id"); uid != "" {
+		req.Header.Set("X-User-Id", uid)
+	}
+	if name := c.GetString("user_name"); name != "" {
+		req.Header.Set("X-User-Name", name)
+	}
 }
 
 // proxyRequest forwards a request to FastAPI and writes the response back to Gin.
 // It preserves the FastAPI status code.
 func proxyRequest(c *gin.Context, req *http.Request) {
+	if tok := getAIInternalToken(); tok != "" {
+		req.Header.Set("X-Internal-Token", tok)
+	}
+	forwardIdentity(c, req)
 	resp, err := aiHTTPClient.Do(req)
 	if err != nil {
 		RespondError(c, http.StatusBadGateway, fmt.Sprintf("Service IA indisponible: %s", err.Error()))
@@ -218,9 +241,17 @@ func HandleAIQueryStream() gin.HandlerFunc {
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept", "text/event-stream")
+		if tok := getAIInternalToken(); tok != "" {
+			req.Header.Set("X-Internal-Token", tok)
+		}
+		forwardIdentity(c, req)
 
-		// Use a dedicated streaming client with no timeout (stream runs until [DONE])
-		streamClient := &http.Client{}
+		// Streaming client: bound the time to receive response headers (fail fast if
+		// the AI service hangs) but do NOT cap total time — the SSE body streams
+		// until [DONE].
+		streamClient := &http.Client{
+			Transport: &http.Transport{ResponseHeaderTimeout: 90 * time.Second},
+		}
 		resp, err := streamClient.Do(req)
 		if err != nil {
 			RespondError(c, http.StatusBadGateway, fmt.Sprintf("Service IA indisponible: %s", err.Error()))
@@ -321,6 +352,25 @@ func HandleAIMobileDiagnosticWorkOrder() gin.HandlerFunc {
 			RespondError(c, http.StatusInternalServerError, errAIRequestCreation)
 			return
 		}
+		proxyRequest(c, req)
+	}
+}
+
+// HandleAIFeedback proxies POST /ai/feedback to FastAPI (👍 / 👎 on an answer).
+func HandleAIFeedback() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		bodyBytes, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			RespondError(c, http.StatusBadRequest, "Corps de requête invalide")
+			return
+		}
+		req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost,
+			getAIServiceURL()+"/ai/feedback", bytes.NewReader(bodyBytes))
+		if err != nil {
+			RespondError(c, http.StatusInternalServerError, errAIRequestCreation)
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
 		proxyRequest(c, req)
 	}
 }

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"html/template"
 	"log"
 	"net/http"
 	"os"
@@ -35,6 +34,19 @@ func main() {
 
 	if err := repository.SeedMockDataIfEmpty(db); err != nil {
 		log.Printf("Warning: Database seeder failed: %v", err)
+	}
+
+	// Charge le profil de dimming appris du dataset (data-driven). Vide = le
+	// calculateur retombe sur ses règles ; rempli par tools/import-telemetry.
+	if err := services.LoadDimmingReference(context.Background(), db); err != nil {
+		log.Printf("Warning: chargement dimming_reference: %v", err)
+	} else if services.DimmingReferenceReady() {
+		log.Println("Profil de dimming data-driven chargé.")
+	}
+
+	// Seuils de détection de panne (maintenance prédictive), configurables.
+	if err := services.LoadFaultThresholds(context.Background(), db); err != nil {
+		log.Printf("Warning: chargement fault_thresholds: %v", err)
 	}
 
 	// Background service: mark offline lampadaires every minute
@@ -82,23 +94,18 @@ func main() {
 	lcuAdapter := services.NewLCUAdapter()
 
 	router := gin.Default()
-	router.Static("/static", "./static")
-	router.SetHTMLTemplate(template.Must(template.ParseFiles("templates/index.tmpl")))
 
-	// Page routes
-	router.GET("/", controllers.HandleIndex(db))
-	router.GET("/lcus", controllers.HandleListLCUs(db))
-	router.POST("/lcus", controllers.HandleCreateLCU(db))
-	router.POST("/lcus/:id", controllers.HandleUpdateLCU(db))
-	router.POST("/lampadaires", controllers.HandleCreateLampadaire(db))
-	router.POST("/lampadaires/:id", controllers.HandleUpdateLampadaire(db))
-	router.POST("/lampadaires/:id/archive", controllers.HandleArchiveLampadaire(db))
-	router.POST("/lampadaires/:id/restore", controllers.HandleRestoreLampadaire(db))
+	// NOTE: L'ancienne interface HTML server-rendered (routes de pages "/",
+	// "/lcus" + formulaires POST) a été supprimée. Elle dupliquait le frontend
+	// React et exposait des routes de mutation SANS authentification. Toutes les
+	// opérations passent désormais par l'API JSON /api/* protégée par JWT.
 
 	// Auth routes (public — no JWT required)
+	// Rate limit login : 5 tentatives/minute par IP contre le brute-force.
+	loginLimiter := middleware.NewRateLimiter(5, time.Minute)
 	authGroup := router.Group("/api/auth")
 	{
-		authGroup.POST("/login", controllers.HandleLogin(db))
+		authGroup.POST("/login", loginLimiter.Middleware(), controllers.HandleLogin(db))
 		// Protected auth routes
 		authGroup.GET("/me", middleware.JWTMiddleware(), controllers.HandleMe())
 		authGroup.POST("/change-password", middleware.JWTMiddleware(), controllers.HandleChangePassword(db))
@@ -144,7 +151,7 @@ func main() {
 		api.POST("/lighting-profiles/:id/enable", controllers.HandleEnableLightingProfile(db))
 		api.POST("/lighting-profiles/:id/disable", controllers.HandleDisableLightingProfile(db))
 		api.PUT("/lighting-profiles/:id", controllers.HandleUpdateLightingProfile(db))
-		api.DELETE("/lighting-profiles/:id", controllers.HandleDeleteLightingProfile(db))
+		api.DELETE("/lighting-profiles/:id", middleware.RequireRole("admin"), controllers.HandleDeleteLightingProfile(db))
 
 		// Lighting Groups API
 		api.GET("/lighting-groups", controllers.HandleGetLightingGroups(db))
@@ -178,6 +185,7 @@ func main() {
 		api.POST("/calculateur/run/:id", controllers.HandleRunCalculator(db, lcuAdapter))
 		api.POST("/calculateur/run-all", controllers.HandleRunCalculatorAll(db, lcuAdapter))
 		api.GET("/lampadaires/:id/decisions", controllers.HandleGetDecisions(db))
+		api.GET("/calculateur/evaluate-dataset", middleware.RequireRole("admin"), controllers.HandleEvaluateDataset(db))
 
 		// Dashboard API
 		api.GET("/dashboard/stats", controllers.HandleGetDashboardStats(db))
@@ -189,6 +197,25 @@ func main() {
 		api.GET("/energy/anomalies", controllers.HandleGetEnergyAnomalies(db))
 		api.GET("/energy/hourly", controllers.HandleGetEnergyHourly(db))
 		api.GET("/energy/recommendations", controllers.HandleGetEnergyRecommendations(db))
+
+		// Calendrier astronomique (lever/coucher soleil — allumage crépusculaire)
+		api.GET("/astronomy/sun", controllers.HandleGetSunTimes())
+
+		// Maintenance prédictive — lampadaires à risque, stats et historique de pannes
+		api.GET("/faults/at-risk", controllers.HandleGetAtRiskLamps(db))
+		api.GET("/faults/stats", controllers.HandleGetFaultStats(db))
+		api.GET("/lampadaires/:id/faults", controllers.HandleGetLampFaults(db))
+		// Endpoints prédictifs enrichis (score, confiance, échéance, signaux, tendance)
+		api.GET("/faults/predictions", controllers.HandleGetPredictions(db))
+		api.GET("/faults/predictive-summary", controllers.HandleGetPredictiveSummary(db))
+		api.GET("/faults/trend", controllers.HandleGetRiskTrend(db))
+		api.GET("/lampadaires/:id/prediction", controllers.HandleGetLampPrediction(db))
+
+		// Financier — tarification ONEE, facture réelle, synthèse direction
+		api.GET("/energy/tariffs", controllers.HandleGetTariffs(db))
+		api.PUT("/energy/tariffs", middleware.RequireRole("admin"), controllers.HandleUpdateTariffs(db))
+		api.GET("/energy/bill", controllers.HandleGetEnergyBill(db))
+		api.GET("/finance/summary", controllers.HandleGetFinancialSummary(db))
 
 		// Simulator API
 		api.POST("/simulator/telemetry/:id", controllers.HandleSimulateTelemetry(db))
@@ -280,6 +307,7 @@ func main() {
 		api.GET("/ai/health", controllers.HandleAIHealth())
 		api.POST("/ai/query", controllers.HandleAIQuery())
 		api.POST("/ai/query/stream", controllers.HandleAIQueryStream())
+		api.POST("/ai/feedback", controllers.HandleAIFeedback())
 		api.GET("/ai/history", controllers.HandleAIHistory())
 		api.GET("/ai/page-insights/:page", controllers.HandleAIPageInsights())
 		api.GET("/ai/suggestions", controllers.HandleAISuggestions())
@@ -293,23 +321,23 @@ func main() {
 		api.GET("/system/version", controllers.HandleSystemVersion)
 		api.GET("/system/jobs", controllers.HandleSystemJobs(db))
 		api.GET("/system/config", controllers.HandleGetSystemConfig(db))
-		api.PUT("/system/config", controllers.HandleUpdateSystemConfig(db))
+		api.PUT("/system/config", middleware.RequireRole("admin"), controllers.HandleUpdateSystemConfig(db))
 
 		// Maintenance Windows
 		api.GET("/maintenance-windows", controllers.HandleGetMaintenanceWindows(db))
 		api.GET("/maintenance-windows/active", controllers.HandleGetActiveMaintenanceWindows(db))
 		api.GET("/maintenance-windows/upcoming", controllers.HandleGetUpcomingMaintenanceWindows(db))
 		api.GET("/maintenance-windows/check", controllers.HandleCheckMaintenance(db))
-		api.POST("/maintenance-windows", controllers.HandleCreateMaintenanceWindow(db))
+		api.POST("/maintenance-windows", middleware.RequireRole("admin"), controllers.HandleCreateMaintenanceWindow(db))
 		api.GET("/maintenance-windows/:id", controllers.HandleGetMaintenanceWindow(db))
-		api.PUT("/maintenance-windows/:id", controllers.HandleUpdateMaintenanceWindow(db))
-		api.POST("/maintenance-windows/:id/cancel", controllers.HandleCancelMaintenanceWindow(db))
-		api.POST("/maintenance-windows/:id/complete", controllers.HandleCompleteMaintenanceWindow(db))
-		api.DELETE("/maintenance-windows/:id", controllers.HandleDeleteMaintenanceWindow(db))
+		api.PUT("/maintenance-windows/:id", middleware.RequireRole("admin"), controllers.HandleUpdateMaintenanceWindow(db))
+		api.POST("/maintenance-windows/:id/cancel", middleware.RequireRole("admin"), controllers.HandleCancelMaintenanceWindow(db))
+		api.POST("/maintenance-windows/:id/complete", middleware.RequireRole("admin"), controllers.HandleCompleteMaintenanceWindow(db))
+		api.DELETE("/maintenance-windows/:id", middleware.RequireRole("admin"), controllers.HandleDeleteMaintenanceWindow(db))
 		api.GET("/maintenance-windows/:id/workorders", controllers.HandleGetMaintenanceWindowWorkOrders(db))
 
-		// CSV import
-		api.POST("/lampadaires/import", controllers.HandleImportLampadaires(db))
+		// CSV import — opération de masse réservée à l'admin
+		api.POST("/lampadaires/import", middleware.RequireRole("admin"), controllers.HandleImportLampadaires(db))
 	}
 
 	// Mobile API — technician app routes (JWT required)

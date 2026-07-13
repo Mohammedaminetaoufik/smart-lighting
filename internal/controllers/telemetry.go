@@ -125,6 +125,11 @@ func HandlePostTelemetry(db *sql.DB) gin.HandlerFunc {
 			return
 		}
 
+		// Auto-création de bons de travail (post-commit : les alertes sont persistées).
+		for i := range alerts {
+			_, _, _ = services.AutoCreateWorkOrderIfNeeded(db, &alerts[i])
+		}
+
 		RespondJSON(c, http.StatusCreated, gin.H{
 			"measurement": m,
 			"alerts":      alerts,

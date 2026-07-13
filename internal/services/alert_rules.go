@@ -78,5 +78,20 @@ func RunAlertRules(ctx context.Context, db repository.DBExecutor, lamp *models.L
 		}
 	}
 
+	// Maintenance prédictive : classer la panne électrique (règles apprises du
+	// dataset). Sur panne → alerte + historique fault_events + fault_status.
+	if fr := ClassifyFault(lamp, m); fr.FaultType != 0 {
+		msg := fmt.Sprintf("%s détectée sur le lampadaire %s (%s).", fr.Label, lamp.Reference, fr.Cause)
+		createAlert(fr.AlertType, fr.Severity, msg, fr.Severity == "critical")
+		_ = repository.InsertFaultEvent(ctx, db, lamp.ID, fr.FaultType, fr.Label, fr.Confidence, m, "", "live")
+		_ = repository.UpdateLampFaultStatus(ctx, db, lamp.ID, fr.Code)
+	} else {
+		// Sain : résoudre les alertes de panne live (on préserve le fault_status
+		// issu du backfill dataset — non touché ici).
+		for _, at := range []string{"fault_overcurrent", "fault_overvoltage", "fault_underpower"} {
+			repository.ResolveOpenAlert(ctx, db, lamp.ID, at)
+		}
+	}
+
 	return alerts
 }
